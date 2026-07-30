@@ -187,10 +187,10 @@ Ce taux est cohérent avec les observations de terrain sur l'application de la L
 
 ## Fonctionnalités du dashboard
 
-- **⚠️ Alertes L228-2** : tableau filtrable des marchés à risque, lien direct BOAMP, export CSV
-- **🚲 Communes actives vélo** : collectivités qui intègrent le cyclable (conformes L228-2 + projets purs), carte géo, types d'infrastructures mentionnées
-- **🗺️ Carte & stats** : choroplèthe par département, timeline, distribution des scores
-- **📐 Méthodologie** : explication complète du scoring
+- **⚠️ Alertes L228-2** : tableau filtrable des marchés à risque, date limite de réponse, liens directs vers la fiche BOAMP et vers l'**extrait PDF officiel** de l'appel d'offres, export CSV.
+- **🚲 Communes actives vélo** : collectivités qui intègrent le cyclable (conformes L228-2 + projets purs), date limite, extrait PDF & liens BOAMP, carte géo, types d'infrastructures mentionnées.
+- **🗺️ Carte & stats** : choroplèthe par département, timeline, distribution des scores.
+- **📐 Méthodologie** : explication complète du scoring.
 
 Filtres disponibles : département, période, score minimum, recherche textuelle.
 
@@ -199,7 +199,7 @@ Filtres disponibles : département, période, score minimum, recherche textuelle
 ## Limites connues
 
 - La description complète du CCTP n'est pas accessible via l'API — seuls le titre et le champ `donnees` (description structurée) sont analysés. Des marchés conformes peuvent rester classés en alerte si la mention cyclable n'est que dans le CCTP.
-- Le scoring est heuristique. Des cas limites existent — la vérification manuelle sur [boamp.fr](https://www.boamp.fr) reste recommandée avant toute action.
+- Le scoring est heuristique. Des cas limites existent — la vérification manuelle du PDF d'extrait sur [boamp.fr](https://www.boamp.fr) reste recommandée avant toute action.
 - Couverture BOAMP : principalement les marchés > 40 000 € HT. Les MAPA inférieurs à ce seuil peuvent ne pas y figurer.
 
 ---
@@ -210,14 +210,21 @@ Filtres disponibles : département, période, score minimum, recherche textuelle
 |---|---|
 | `idweb` | Identifiant unique BOAMP |
 | `dateparution` | Date de publication |
+| `datelimitereponse` | Date limite de dépôt des offres / réponses |
 | `dept` | Département (2 caractères) |
 | `nomacheteur` | Nom de l'acheteur public |
 | `objet` | Titre du marché |
 | `descripteur_str` | Descripteurs BOAMP |
+| `procedure_libelle` | Type de procédure |
 | `score_perimetre` | Score L228-2 (−3 à +5) |
 | `dans_perimetre` | True si score ≥ 2 |
 | `cyclable_detecte` | True si mention d'aménagement cyclable |
 | `cyclable_mots` | Mots cyclables détectés |
+| `source_cyclable` | Source de la détection (titre ou description) |
+| `alerte_l228` | True si marché sous obligation sans vélo |
+| `vrai_conforme` | True si marché conforme L228-2 |
+| `url_avis` | Lien vers l'annonce web BOAMP |
+| `url_pdf` | Lien de téléchargement direct de l'extrait PDF de l'avis |
 | `source_cyclable` | `titre` ou `description` |
 | `alerte_l228` | **True = à vérifier** |
 | `url_avis` | Lien direct vers l'annonce BOAMP |

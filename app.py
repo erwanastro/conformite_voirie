@@ -136,7 +136,14 @@ def load(path):
             return str(v).zfill(2)[:2]
     if 'code_departement' in df.columns:
         df['dept'] = df['code_departement'].apply(parse_dept)
-    df['dateparution'] = pd.to_datetime(df['dateparution'], errors='coerce')
+    df['dateparution'] = pd.to_datetime(df['dateparution'], errors='coerce', utc=True).dt.tz_localize(None)
+    if 'datelimitereponse' in df.columns:
+        df['datelimitereponse'] = pd.to_datetime(df['datelimitereponse'], errors='coerce', utc=True).dt.tz_localize(None)
+    if 'url_pdf' not in df.columns:
+        df['url_pdf'] = ''
+    if 'url_avis' not in df.columns and 'idweb' in df.columns:
+        df['url_avis'] = 'https://www.boamp.fr/pages/avis/?q=idweb:' + df['idweb'].astype(str)
+
     # Recalculer scores v5
     df['score_perimetre']  = df.apply(score_perimetre, axis=1)
     df['dans_perimetre']   = df['score_perimetre'] >= 2
@@ -244,21 +251,29 @@ with tab_alertes:
         st.info("Aucune alerte avec les filtres actuels.")
     else:
         cols_map = {
-            'dateparution':'Date','dept':'Dept','score_perimetre':'Score',
-            'nomacheteur':'Acheteur','objet':'Objet',
-            'descripteur_str':'Descripteurs','url_avis':'BOAMP'
+            'dateparution':'Publication', 'datelimitereponse':'Date limite',
+            'dept':'Dept', 'score_perimetre':'Score',
+            'nomacheteur':'Acheteur', 'objet':'Objet',
+            'procedure_libelle':'Procédure', 'descripteur_str':'Descripteurs',
+            'url_avis':'BOAMP', 'url_pdf':'Extrait PDF'
         }
         cols_ok = [c for c in cols_map if c in alertes_dff.columns]
         disp = alertes_dff[cols_ok].copy()
-        disp['dateparution'] = disp['dateparution'].dt.strftime('%d/%m/%Y')
+        if 'dateparution' in disp.columns:
+            disp['dateparution'] = disp['dateparution'].dt.strftime('%d/%m/%Y')
+        if 'datelimitereponse' in disp.columns:
+            disp['datelimitereponse'] = disp['datelimitereponse'].apply(
+                lambda d: d.strftime('%d/%m/%Y %H:%M') if pd.notna(d) else ''
+            )
         disp = disp.rename(columns=cols_map).sort_values('Score', ascending=False)
         st.dataframe(
             disp, use_container_width=True, height=500,
             column_config={
-                "BOAMP":   st.column_config.LinkColumn("BOAMP"),
-                "Objet":   st.column_config.TextColumn(width="large"),
-                "Acheteur":st.column_config.TextColumn(width="medium"),
-                "Score":   st.column_config.NumberColumn(format="%d ⭐"),
+                "BOAMP":      st.column_config.LinkColumn("BOAMP", display_text="🌐 Avis BOAMP"),
+                "Extrait PDF":st.column_config.LinkColumn("Extrait PDF", display_text="📄 PDF Extrait"),
+                "Objet":      st.column_config.TextColumn(width="large"),
+                "Acheteur":   st.column_config.TextColumn(width="medium"),
+                "Score":      st.column_config.NumberColumn(format="%d ⭐"),
             }
         )
         csv_dl = alertes_dff.to_csv(index=False, encoding='utf-8-sig').encode('utf-8-sig')
@@ -286,12 +301,18 @@ with tab_communes:
                 src  = r.get('source_cyclable', '')
                 src_badge = f"<span style='font-size:10px;color:#666'>(détecté dans : {src})</span>" if src else ""
                 url  = r.get('url_avis','')
-                link = f"<a href='{url}' target='_blank' style='font-size:11px'>→ BOAMP</a>" if url else ""
+                url_pdf = r.get('url_pdf','')
+                links = []
+                if url: links.append(f"<a href='{url}' target='_blank' style='font-size:11px;margin-right:10px;'>🌐 BOAMP</a>")
+                if url_pdf: links.append(f"<a href='{url_pdf}' target='_blank' style='font-size:11px;'>📄 Extrait PDF</a>")
+                links_html = " ".join(links)
+                dt_lim = r.get('datelimitereponse')
+                lim_badge = f" · Limite : {pd.to_datetime(dt_lim).strftime('%d/%m/%Y')}" if pd.notna(dt_lim) else ""
                 st.markdown(f"""<div class='commune-card'>
-                    <div style='font-weight:600;font-size:14px'>{r.get('nomacheteur','')}</div>
+                    <div style='font-weight:600;font-size:14px'>{r.get('nomacheteur','')} <span style='font-size:11px;font-weight:400;color:#666'>{lim_badge}</span></div>
                     <div style='font-size:12px;color:#2d6a4f'>{mots}</div>
                     <div style='font-size:11px;color:#555;margin-top:2px'>{str(r.get('objet',''))[:75]} {src_badge}</div>
-                    <div>{link}</div>
+                    <div style='margin-top:4px;'>{links_html}</div>
                 </div>""", unsafe_allow_html=True)
 
         with col_r:
@@ -300,12 +321,18 @@ with tab_communes:
             for _, r in projets_pur.sort_values('dateparution', ascending=False).iterrows():
                 mots = str(r.get('cyclable_mots','')).replace(', ', ' · ')
                 url  = r.get('url_avis','')
-                link = f"<a href='{url}' target='_blank' style='font-size:11px'>→ BOAMP</a>" if url else ""
+                url_pdf = r.get('url_pdf','')
+                links = []
+                if url: links.append(f"<a href='{url}' target='_blank' style='font-size:11px;margin-right:10px;'>🌐 BOAMP</a>")
+                if url_pdf: links.append(f"<a href='{url_pdf}' target='_blank' style='font-size:11px;'>📄 Extrait PDF</a>")
+                links_html = " ".join(links)
+                dt_lim = r.get('datelimitereponse')
+                lim_badge = f" · Limite : {pd.to_datetime(dt_lim).strftime('%d/%m/%Y')}" if pd.notna(dt_lim) else ""
                 st.markdown(f"""<div class='projet-pur'>
-                    <div style='font-weight:600;font-size:14px'>{r.get('nomacheteur','')}</div>
+                    <div style='font-weight:600;font-size:14px'>{r.get('nomacheteur','')} <span style='font-size:11px;font-weight:400;color:#666'>{lim_badge}</span></div>
                     <div style='font-size:12px;color:#2b6cb0'>{mots}</div>
                     <div style='font-size:11px;color:#555;margin-top:2px'>{str(r.get('objet',''))[:75]}</div>
-                    <div>{link}</div>
+                    <div style='margin-top:4px;'>{links_html}</div>
                 </div>""", unsafe_allow_html=True)
 
         # Carte des communes actives

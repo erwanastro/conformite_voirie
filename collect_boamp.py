@@ -184,6 +184,23 @@ def fetch_period(date_start_str, date_end_str):
         time.sleep(0.2)
     return records
 
+def build_pdf_url(row):
+    idweb = str(row.get('idweb', '')).strip()
+    if not idweb or idweb == 'nan':
+        return ''
+    dateparution = pd.to_datetime(row.get('dateparution'), errors='coerce')
+    if pd.isna(dateparution):
+        return f"https://www.boamp.fr/pages/avis/pdf-detail/?idweb={idweb}"
+    year = dateparution.strftime('%Y')
+    month = dateparution.strftime('%m')
+    schema = str(row.get('source_schema', ''))
+    filename = str(row.get('filename', ''))
+    if schema.startswith('3'):
+        return f"https://www.boamp.fr/telechargements/FILES/PDF/{year}/{month}/{idweb}.pdf"
+    elif filename and filename != 'nan':
+        return f"https://www.boamp.fr/telechargements/PDF/{year}/{filename}/{idweb}.pdf"
+    return f"https://www.boamp.fr/pages/avis/pdf-detail/?idweb={idweb}"
+
 def collect_data(jours=365):
     end_date = datetime.now()
     start_date = end_date - timedelta(days=jours)
@@ -216,7 +233,10 @@ def collect_data(jours=365):
         df = df.drop_duplicates(subset=['idweb']).copy()
 
     # Nettoyage
-    df['dateparution'] = pd.to_datetime(df['dateparution'], errors='coerce')
+    df['dateparution'] = pd.to_datetime(df['dateparution'], errors='coerce', utc=True).dt.tz_localize(None)
+    if 'datelimitereponse' in df.columns:
+        df['datelimitereponse'] = pd.to_datetime(df['datelimitereponse'], errors='coerce', utc=True).dt.tz_localize(None)
+
     def parse_dept(v):
         try:
             lst = ast.literal_eval(str(v))
@@ -254,15 +274,17 @@ def collect_data(jours=365):
     df['vrai_conforme']    = df['dans_perimetre'] & df['cyclable_detecte'] & ~df['faux_conforme']
     df['alerte_l228']      = df['dans_perimetre'] & ~df['cyclable_detecte']
 
-    # URL d'avis BOAMP
+    # URL d'avis BOAMP et PDF extrait
     if 'idweb' in df.columns:
         df['url_avis'] = 'https://www.boamp.fr/pages/avis/?q=idweb:' + df['idweb'].astype(str)
+        df['url_pdf'] = df.apply(build_pdf_url, axis=1)
 
     cols_export = [
-        'idweb', 'dateparution', 'dept', 'code_departement', 'nomacheteur', 'objet',
+        'idweb', 'dateparution', 'datelimitereponse', 'dept', 'code_departement', 'nomacheteur', 'objet',
         'descripteur_str', 'famille_libelle', 'procedure_libelle', 'nature_libelle',
+        'filename', 'source_schema',
         'score_perimetre', 'dans_perimetre', 'cyclable_detecte', 'cyclable_mots',
-        'source_cyclable', 'alerte_l228', 'vrai_conforme', 'faux_conforme', 'url_avis'
+        'source_cyclable', 'alerte_l228', 'vrai_conforme', 'faux_conforme', 'url_avis', 'url_pdf'
     ]
     cols_existantes = [c for c in cols_export if c in df.columns]
     df_export = df[cols_existantes]
