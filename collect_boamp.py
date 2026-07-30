@@ -201,6 +201,18 @@ def build_pdf_url(row):
         return f"https://www.boamp.fr/telechargements/PDF/{year}/{filename}/{idweb}.pdf"
     return f"https://www.boamp.fr/pages/avis/pdf-detail/?idweb={idweb}"
 
+def categoriser_type_acheteur(nom):
+    n = str(nom).lower().strip()
+    if not n:
+        return 'Autre'
+    if re.search(r'\b(d[eé]partement|d[eé]partemental|conseil d[eé]partemental|conseil g[eé]n[eé]ral)\b', n) or re.search(r'\bcd\s*\d{2,3}\b', n):
+        return 'Département'
+    if re.search(r'\b(agglom[eé]ration|agglom[eé]r[eé]e?|m[eé]tropole|eurom[eé]tropole|communaut[eé]|epci|sivom|sivutc|syndicat|intercommunale?|intercommunal|petr|pnr|parc naturel|siavb|siaap|ct[eé]\s*cnes|ct[eé]|cnes)\b|\bc\.?c\.?\b|\bc\.?a\.?b?\b|\bc\.?u\.?\b|\bca\b|\bcc\b', n):
+        return 'Agglomération'
+    if re.search(r'\b(ville|mairie|commune)\b', n) or re.search(r'^(saint-|sainte-|st-|ste-)', n):
+        return 'Ville'
+    return 'Autre'
+
 def collect_data(jours=365):
     end_date = datetime.now()
     start_date = end_date - timedelta(days=jours)
@@ -252,6 +264,8 @@ def collect_data(jours=365):
         if col in df.columns:
             df[col] = df[col].fillna('').astype(str).str.strip()
 
+    df['type_acheteur'] = df['nomacheteur'].apply(categoriser_type_acheteur)
+
     print("Extraction des descriptions complètes...")
     if 'donnees' in df.columns:
         df['description_donnees'] = df['donnees'].apply(extraire_textes_donnees)
@@ -280,7 +294,7 @@ def collect_data(jours=365):
         df['url_pdf'] = df.apply(build_pdf_url, axis=1)
 
     cols_export = [
-        'idweb', 'dateparution', 'datelimitereponse', 'dept', 'code_departement', 'nomacheteur', 'objet',
+        'idweb', 'dateparution', 'datelimitereponse', 'dept', 'code_departement', 'nomacheteur', 'type_acheteur', 'objet',
         'descripteur_str', 'famille_libelle', 'procedure_libelle', 'nature_libelle',
         'filename', 'source_schema',
         'score_perimetre', 'dans_perimetre', 'cyclable_detecte', 'cyclable_mots',

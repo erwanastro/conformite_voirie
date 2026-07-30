@@ -207,6 +207,10 @@ def load(path):
         df['url_pdf'] = ''
     if 'url_avis' not in df.columns and 'idweb' in df.columns:
         df['url_avis'] = 'https://www.boamp.fr/pages/avis/?q=idweb:' + df['idweb'].astype(str)
+    if 'type_acheteur' not in df.columns:
+        df['type_acheteur'] = 'Autre'
+    else:
+        df['type_acheteur'] = df['type_acheteur'].fillna('Autre').astype(str).str.strip().replace('', 'Autre')
 
     # Recalculer scores v5
     df['score_perimetre']  = df.apply(score_perimetre, axis=1)
@@ -250,6 +254,8 @@ dates = df['dateparution'].dropna()
 d_min, d_max = dates.min().date(), dates.max().date()
 available_depts = sorted(df['dept'].dropna().unique())
 
+available_types = ['Ville', 'Agglomération', 'Département', 'Autre']
+
 # Synchro query_params -> session_state à l'initialisation
 if "filter_plage" not in st.session_state:
     q_ds = st.query_params.get("d_start")
@@ -271,6 +277,14 @@ if "filter_depts" not in st.session_state:
     else:
         st.session_state["filter_depts"] = []
 
+if "filter_types" not in st.session_state:
+    q_types = st.query_params.get("types")
+    if q_types:
+        valid_types = [t.strip() for t in q_types.split(",") if t.strip() in available_types]
+        st.session_state["filter_types"] = valid_types
+    else:
+        st.session_state["filter_types"] = []
+
 if "filter_score" not in st.session_state:
     q_score = st.query_params.get("score")
     try:
@@ -285,6 +299,7 @@ if "filter_q" not in st.session_state:
 st.sidebar.title("🔍 Filtres")
 plage = st.sidebar.date_input("Période", key="filter_plage", min_value=d_min, max_value=d_max)
 sel_depts = st.sidebar.multiselect("Département(s)", available_depts, key="filter_depts", placeholder="Tous")
+sel_types = st.sidebar.multiselect("Type d'acheteur", available_types, key="filter_types", placeholder="Tous")
 score_min = st.sidebar.slider("Score périmètre minimum", 0, 5, key="filter_score")
 texte = st.sidebar.text_input("Recherche dans l'objet", key="filter_q", placeholder="réfection, avenue…")
 
@@ -301,6 +316,11 @@ if sel_depts:
 else:
     st.query_params.pop("depts", None)
 
+if sel_types:
+    st.query_params["types"] = ",".join(sel_types)
+else:
+    st.query_params.pop("types", None)
+
 if score_min > 0:
     st.query_params["score"] = str(score_min)
 else:
@@ -315,6 +335,7 @@ mask = pd.Series(True, index=df.index)
 if len(plage) == 2:
     mask &= (df['dateparution'] >= pd.Timestamp(plage[0])) & (df['dateparution'] <= pd.Timestamp(plage[1]))
 if sel_depts: mask &= df['dept'].isin(sel_depts)
+if sel_types: mask &= df['type_acheteur'].isin(sel_types)
 if score_min: mask &= df['score_perimetre'] >= score_min
 if texte:     mask &= df['objet'].str.contains(texte, case=False, na=False)
 dff = df[mask].copy()
@@ -410,7 +431,7 @@ if active_slug == "alertes":
         cols_map = {
             'dateparution':'Publication', 'datelimitereponse':'Date limite',
             'dept':'Dept', 'score_perimetre':'Score',
-            'nomacheteur':'Acheteur', 'objet':'Objet',
+            'nomacheteur':'Acheteur', 'type_acheteur':"Type d'acheteur", 'objet':'Objet',
             'procedure_libelle':'Procédure', 'descripteur_str':'Descripteurs',
             'url_avis':'BOAMP', 'url_pdf':'Extrait PDF'
         }
@@ -461,11 +482,12 @@ if active_slug == "alertes":
         st.dataframe(
             disp_page, use_container_width=True, height=500,
             column_config={
-                "BOAMP":      st.column_config.LinkColumn("BOAMP", display_text="🌐 Avis BOAMP"),
-                "Extrait PDF":st.column_config.LinkColumn("Extrait PDF", display_text="📄 PDF Extrait"),
-                "Objet":      st.column_config.TextColumn(width="large"),
-                "Acheteur":   st.column_config.TextColumn(width="medium"),
-                "Score":      st.column_config.NumberColumn(format="%d ⭐"),
+                "BOAMP":          st.column_config.LinkColumn("BOAMP", display_text="🌐 Avis BOAMP"),
+                "Extrait PDF":    st.column_config.LinkColumn("Extrait PDF", display_text="📄 PDF Extrait"),
+                "Objet":          st.column_config.TextColumn(width="large"),
+                "Acheteur":       st.column_config.TextColumn(width="medium"),
+                "Type d'acheteur":st.column_config.TextColumn(width="small"),
+                "Score":          st.column_config.NumberColumn(format="%d ⭐"),
             }
         )
 
