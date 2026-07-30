@@ -183,6 +183,7 @@ def render_pagination(current_page, total_pages, key_prefix="alertes"):
 
     if new_page != current_page:
         st.session_state[f"{key_prefix}_page"] = new_page
+        st.query_params["page"] = str(new_page)
         st.rerun()
 
     return new_page
@@ -244,14 +245,71 @@ else:
 
 geo = load_geo()
 
-# ── SIDEBAR ───────────────────────────────────────────────────
-st.sidebar.title("🔍 Filtres")
+# ── SIDEBAR & FILTRES EN ST.QUERY_PARAMS ──────────────────────
 dates = df['dateparution'].dropna()
 d_min, d_max = dates.min().date(), dates.max().date()
-plage = st.sidebar.date_input("Période", (d_min, d_max), min_value=d_min, max_value=d_max)
-sel_depts = st.sidebar.multiselect("Département(s)", sorted(df['dept'].dropna().unique()), placeholder="Tous")
-score_min = st.sidebar.slider("Score périmètre minimum", 0, 5, 0)
-texte = st.sidebar.text_input("Recherche dans l'objet", placeholder="réfection, avenue…")
+available_depts = sorted(df['dept'].dropna().unique())
+
+# Synchro query_params -> session_state à l'initialisation
+if "filter_plage" not in st.session_state:
+    q_ds = st.query_params.get("d_start")
+    q_de = st.query_params.get("d_end")
+    try:
+        ds = datetime.strptime(q_ds, "%Y-%m-%d").date() if q_ds else d_min
+        de = datetime.strptime(q_de, "%Y-%m-%d").date() if q_de else d_max
+        if ds < d_min or ds > d_max: ds = d_min
+        if de < d_min or de > d_max: de = d_max
+        st.session_state["filter_plage"] = (min(ds, de), max(ds, de))
+    except:
+        st.session_state["filter_plage"] = (d_min, d_max)
+
+if "filter_depts" not in st.session_state:
+    q_depts = st.query_params.get("depts")
+    if q_depts:
+        valid_depts = [d.strip() for d in q_depts.split(",") if d.strip() in available_depts]
+        st.session_state["filter_depts"] = valid_depts
+    else:
+        st.session_state["filter_depts"] = []
+
+if "filter_score" not in st.session_state:
+    q_score = st.query_params.get("score")
+    try:
+        sc = int(q_score) if q_score else 0
+        st.session_state["filter_score"] = min(max(0, sc), 5)
+    except:
+        st.session_state["filter_score"] = 0
+
+if "filter_q" not in st.session_state:
+    st.session_state["filter_q"] = st.query_params.get("q", "")
+
+st.sidebar.title("🔍 Filtres")
+plage = st.sidebar.date_input("Période", key="filter_plage", min_value=d_min, max_value=d_max)
+sel_depts = st.sidebar.multiselect("Département(s)", available_depts, key="filter_depts", placeholder="Tous")
+score_min = st.sidebar.slider("Score périmètre minimum", 0, 5, key="filter_score")
+texte = st.sidebar.text_input("Recherche dans l'objet", key="filter_q", placeholder="réfection, avenue…")
+
+# Sauvegarde des filtres dans st.query_params
+if len(plage) == 2 and (plage[0] != d_min or plage[1] != d_max):
+    st.query_params["d_start"] = plage[0].strftime("%Y-%m-%d")
+    st.query_params["d_end"] = plage[1].strftime("%Y-%m-%d")
+else:
+    st.query_params.pop("d_start", None)
+    st.query_params.pop("d_end", None)
+
+if sel_depts:
+    st.query_params["depts"] = ",".join(sel_depts)
+else:
+    st.query_params.pop("depts", None)
+
+if score_min > 0:
+    st.query_params["score"] = str(score_min)
+else:
+    st.query_params.pop("score", None)
+
+if texte:
+    st.query_params["q"] = texte
+else:
+    st.query_params.pop("q", None)
 
 mask = pd.Series(True, index=df.index)
 if len(plage) == 2:
@@ -298,15 +356,52 @@ c5.metric("🚲 Projets cyclables", f"{n_velo:,}",
 st.divider()
 
 # ── ONGLETS PRINCIPAUX ────────────────────────────────────────
-tab_alertes, tab_communes, tab_carte, tab_methodo = st.tabs([
+tab_slugs = ["alertes", "communes", "carte", "methodo"]
+slug_to_idx = {s: i for i, s in enumerate(tab_slugs)}
+q_tab = st.query_params.get("tab", "alertes")
+initial_tab_idx = slug_to_idx.get(q_tab, 0)
+
+tab_labels = [
     f"⚠️ Alertes L228-2 ({n_a})",
     f"🚲 Communes actives vélo ({n_velo})",
     "🗺️ Carte & stats",
     "📐 Méthodologie",
-])
+]
+initial_label = tab_labels[initial_tab_idx]
+
+if "active_tab_label" not in st.session_state or st.session_state["active_tab_label"] not in tab_labels:
+    st.session_state["active_tab_label"] = initial_label
+
+def on_tab_change():
+    new_label = st.session_state.get("active_tab_label")
+    if new_label in tab_labels:
+        new_idx = tab_labels.index(new_label)
+        new_slug = tab_slugs[new_idx]
+        st.query_params["tab"] = new_slug
+        # Nettoyer la pagination lors d'un changement d'onglet
+        st.query_params.pop("page", None)
+        st.session_state.pop("alertes_page", None)
+
+selected_tab_label = st.segmented_control(
+    "Navigation",
+    options=tab_labels,
+    key="active_tab_label",
+    selection_mode="single",
+    label_visibility="collapsed",
+    width="stretch",
+    on_change=on_tab_change
+)
+
+if not selected_tab_label:
+    selected_tab_label = tab_labels[0]
+    st.session_state["active_tab_label"] = selected_tab_label
+
+selected_idx = tab_labels.index(selected_tab_label) if selected_tab_label in tab_labels else 0
+active_slug = tab_slugs[selected_idx]
+st.query_params["tab"] = active_slug
 
 # ── ONGLET 1 : ALERTES ────────────────────────────────────────
-with tab_alertes:
+if active_slug == "alertes":
     alertes_dff = dff[dff['alerte_l228']].copy()
     if alertes_dff.empty:
         st.markdown(f"**{n_a} marchés de voirie urbaine sans mention d'aménagement cyclable** — soumis à l'obligation L228-2")
@@ -335,10 +430,18 @@ with tab_alertes:
         total_pages = max(1, math.ceil(total_items / ITEMS_PER_PAGE))
 
         if "alertes_page" not in st.session_state:
-            st.session_state.alertes_page = 1
+            q_page = st.query_params.get("page")
+            if q_page and q_page.isdigit():
+                st.session_state.alertes_page = int(q_page)
+            else:
+                st.session_state.alertes_page = 1
 
         if st.session_state.alertes_page > total_pages:
             st.session_state.alertes_page = total_pages
+        elif st.session_state.alertes_page < 1:
+            st.session_state.alertes_page = 1
+
+        st.query_params["page"] = str(st.session_state.alertes_page)
 
         col_title, col_info = st.columns([3, 2])
         with col_title:
@@ -373,7 +476,7 @@ with tab_alertes:
             file_name=f"veloguard_alertes_{datetime.now().strftime('%Y%m%d')}.csv", mime="text/csv")
 
 # ── ONGLET 2 : COMMUNES ACTIVES ───────────────────────────────
-with tab_communes:
+elif active_slug == "communes":
     actifs_dff = dff[(dff['cyclable_detecte'] == True) & (~dff['faux_conforme'])].copy()
 
     if actifs_dff.empty:
@@ -460,7 +563,7 @@ with tab_communes:
             st.plotly_chart(fig_mots, use_container_width=True)
 
 # ── ONGLET 3 : CARTE & STATS ──────────────────────────────────
-with tab_carte:
+elif active_slug == "carte":
     dept_stats = (dff[dff['dans_perimetre']].groupby('dept')
         .agg(total=('idweb','count'), alertes=('alerte_l228','sum'),
              conformes=('vrai_conforme','sum'))
@@ -519,7 +622,7 @@ with tab_carte:
         st.plotly_chart(fig_s, use_container_width=True)
 
 # ── ONGLET 4 : MÉTHODOLOGIE ───────────────────────────────────
-with tab_methodo:
+elif active_slug == "methodo":
     st.markdown("""
 ### 🧠 Fonctionnement de l'algorithme VeloGuard
 
