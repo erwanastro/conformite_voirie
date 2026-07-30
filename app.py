@@ -6,6 +6,7 @@ import re, ast, requests, json, math
 from pathlib import Path
 from datetime import datetime
 from collections import Counter
+from annotations import load_annotations, save_annotation
 
 st.set_page_config(
     page_title="VeloGuard — Conformité L228-2",
@@ -243,6 +244,19 @@ def load(path):
             else:
                 return 'Hors périmètre'
     df['statut_libelle'] = df.apply(categorie_statut, axis=1)
+
+    # Fusion des annotations (relecture, commentaire)
+    df['idweb'] = df['idweb'].astype(str)
+    ann_df = load_annotations()
+    if not ann_df.empty:
+        ann_df['idweb'] = ann_df['idweb'].astype(str)
+        df = df.merge(ann_df[['idweb', 'relecture', 'commentaire']], on='idweb', how='left')
+    else:
+        df['relecture'] = '🔳 Non relu'
+        df['commentaire'] = ''
+
+    df['relecture'] = df['relecture'].fillna('🔳 Non relu').replace('', '🔳 Non relu')
+    df['commentaire'] = df['commentaire'].fillna('')
     return df
 
 @st.cache_data(ttl=86400)
@@ -300,6 +314,8 @@ if "filter_types" not in st.session_state:
         st.session_state["filter_types"] = []
 
 perimetre_options = ["Tous", "Dans le périmètre", "Hors périmètre"]
+relecture_options = ["Tous", "🔳 Non relu", "❎ Pas conforme (L 228-2)", "✅ Conforme (L 228-2)"]
+
 if "filter_perimetre" not in st.session_state:
     q_perim = st.query_params.get("perimetre")
     q_score = st.query_params.get("score")
@@ -319,13 +335,21 @@ if "filter_perimetre" not in st.session_state:
     else:
         st.session_state["filter_perimetre"] = "Tous"
 
+if "filter_relecture" not in st.session_state:
+    q_rel = st.query_params.get("relecture")
+    if q_rel in relecture_options:
+        st.session_state["filter_relecture"] = q_rel
+    else:
+        st.session_state["filter_relecture"] = "Tous"
+
 if "filter_q" not in st.session_state:
     st.session_state["filter_q"] = st.query_params.get("q", "")
 
 st.sidebar.title("🔍 Filtres")
-texte = st.sidebar.text_input("Recherche (objet ou acheteur)", key="filter_q", placeholder="Objet, acheteur")
+texte = st.sidebar.text_input("Recherche (objet, acheteur)", key="filter_q", placeholder="Strasbourg, avenue des Pays-Bas")
 plage = st.sidebar.date_input("Période", key="filter_plage", min_value=d_min, max_value=d_max)
 sel_perimetre = st.sidebar.selectbox("Périmètre L228-2", perimetre_options, key="filter_perimetre")
+sel_relecture = st.sidebar.selectbox("Statut Relecture", relecture_options, key="filter_relecture")
 sel_depts = st.sidebar.multiselect("Département(s)", available_depts, key="filter_depts", placeholder="Tous")
 sel_types = st.sidebar.multiselect("Type d'acheteur", available_types, key="filter_types", placeholder="Tous")
 
@@ -357,6 +381,11 @@ else:
     st.query_params.pop("perimetre", None)
     st.query_params.pop("score", None)
 
+if sel_relecture != "Tous":
+    st.query_params["relecture"] = sel_relecture
+else:
+    st.query_params.pop("relecture", None)
+
 if texte:
     st.query_params["q"] = texte
 else:
@@ -371,10 +400,13 @@ if sel_perimetre == "Dans le périmètre":
     mask &= df['dans_perimetre']
 elif sel_perimetre == "Hors périmètre":
     mask &= ~df['dans_perimetre']
+if sel_relecture != "Tous":
+    mask &= (df['relecture'] == sel_relecture)
 if texte:
     mask &= (
         df['objet'].fillna('').str.contains(texte, case=False, na=False) |
-        df['nomacheteur'].fillna('').str.contains(texte, case=False, na=False)
+        df['nomacheteur'].fillna('').str.contains(texte, case=False, na=False) |
+        df['idweb'].fillna('').astype(str).str.contains(texte, case=False, na=False)
     )
 dff = df[mask].copy()
 
@@ -384,8 +416,10 @@ current_filters = (
     tuple(sel_depts) if sel_depts else (),
     tuple(sel_types) if sel_types else (),
     sel_perimetre,
+    sel_relecture,
     texte
 )
+
 if st.session_state.get("last_filters") != current_filters:
     st.session_state["last_filters"] = current_filters
     st.session_state["alertes_page"] = 1
@@ -489,11 +523,13 @@ if active_slug == "alertes":
         st.info("Aucun marché avec les filtres actuels.")
     else:
         cols_map = {
+            'idweb':'ID BOAMP',
             'dateparution':'Publication', 'datelimitereponse':'Date limite',
             'dept':'Dept', 'score_perimetre':'Score', 'statut_libelle':'Statut',
             'nomacheteur':'Acheteur', 'type_acheteur':"Type d'acheteur", 'objet':'Objet',
             'procedure_libelle':'Procédure', 'descripteur_str':'Descripteurs',
-            'url_avis':'BOAMP', 'url_pdf':'Extrait PDF'
+            'url_avis':'BOAMP', 'url_pdf':'Extrait PDF',
+            'relecture':'Relecture', 'commentaire':'Commentaire'
         }
         cols_ok = [c for c in cols_map if c in alertes_dff.columns]
         disp = alertes_dff[cols_ok].copy()
@@ -541,10 +577,17 @@ if active_slug == "alertes":
         end_idx = start_idx + ITEMS_PER_PAGE
         disp_page = disp.iloc[start_idx:end_idx]
 
-        st.dataframe(
+        edited_df = st.data_editor(
             disp_page, key=f"df_alertes_p{st.session_state.alertes_page}",
-            use_container_width=True, height=500,
+            use_container_width=True, height=500, hide_index=True,
             column_config={
+                "ID BOAMP":       st.column_config.TextColumn(" ", width="small"),
+                "Relecture":      st.column_config.SelectboxColumn(
+                    "Relecture",
+                    options=["🔳 Non relu", "❎ Pas conforme (L 228-2)", "✅ Conforme (L 228-2)"],
+                    default="🔳 Non relu", required=True, width="medium"
+                ),
+                "Commentaire":    st.column_config.TextColumn("Commentaire", width="large"),
                 "BOAMP":          st.column_config.LinkColumn("BOAMP", display_text="🌐 Avis BOAMP"),
                 "Extrait PDF":    st.column_config.LinkColumn("Extrait PDF", display_text="📄 PDF Extrait"),
                 "Objet":          st.column_config.TextColumn(width="large"),
@@ -552,14 +595,34 @@ if active_slug == "alertes":
                 "Type d'acheteur":st.column_config.TextColumn(width="small"),
                 "Statut":         st.column_config.TextColumn(width="medium"),
                 "Score":          st.column_config.NumberColumn(format="%d ⭐"),
-            }
+            },
+            disabled=[c for c in disp_page.columns if c not in ["Relecture", "Commentaire"]]
         )
+
+        # Détecter et enregistrer les modifications
+        changes_detected = False
+        for idx in disp_page.index:
+            old_rel = str(disp_page.loc[idx, 'Relecture']) if pd.notna(disp_page.loc[idx, 'Relecture']) else "🔳 Non relu"
+            new_rel = str(edited_df.loc[idx, 'Relecture']) if pd.notna(edited_df.loc[idx, 'Relecture']) else "🔳 Non relu"
+            
+            old_com = str(disp_page.loc[idx, 'Commentaire']) if pd.notna(disp_page.loc[idx, 'Commentaire']) else ""
+            new_com = str(edited_df.loc[idx, 'Commentaire']) if pd.notna(edited_df.loc[idx, 'Commentaire']) else ""
+
+            if old_rel != new_rel or old_com != new_com:
+                idweb_val = str(alertes_dff.loc[idx, 'idweb'])
+                save_annotation(idweb_val, new_rel, new_com)
+                changes_detected = True
+
+        if changes_detected:
+            st.cache_data.clear()
+            st.rerun()
 
         render_pagination(st.session_state.alertes_page, total_pages, key_prefix="alertes_bottom")
 
         csv_dl = alertes_dff.to_csv(index=False, encoding='utf-8-sig').encode('utf-8-sig')
         st.download_button(f"⬇️ Télécharger ces {len(alertes_dff)} marchés (CSV)", data=csv_dl,
             file_name=f"veloguard_selection_{datetime.now().strftime('%Y%m%d')}.csv", mime="text/csv")
+
 
 # ── ONGLET 2 : COMMUNES ACTIVES ───────────────────────────────
 elif active_slug == "communes":
