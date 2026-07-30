@@ -179,7 +179,7 @@ Ces cas sont identifiés et exclus des "conformes L228-2".
 
 Sur les données de référence (avril 2026, 272 marchés dans le périmètre) :
 - **~6% de conformité** (16 marchés avec mention cyclable)
-- **~94% d'alertes** (255 marchés sans mention cyclable)
+- **~94% de non-conformité** (255 marchés sans mention cyclable)
 
 Ce taux est cohérent avec les observations de terrain sur l'application de la LOM.
 

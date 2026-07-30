@@ -469,27 +469,27 @@ with tab_carte:
 
     col_map, col_bar = st.columns([1.5, 1])
     with col_map:
-        st.subheader("Alertes L228-2 par département")
+        st.subheader("Non conformité par département")
         if geo:
             fig = px.choropleth(dept_stats, geojson=geo, locations='dept',
                 featureidkey='properties.code', color='alertes',
                 color_continuous_scale=["#fff7ed","#fed7aa","#fb923c","#ea580c","#7c2d12"],
                 hover_data={'dept':True,'alertes':True,'total':True,'taux':True},
-                labels={'alertes':'Alertes','total':'Total périmètre','taux':'% alerte'})
+                labels={'alertes':'Non conformités','total':'Total périmètre','taux':'% non conforme'})
             fig.update_geos(fitbounds="locations", visible=False)
             fig.update_layout(margin=dict(r=0,t=10,l=0,b=0), height=400,
-                coloraxis_colorbar=dict(title="Alertes",thickness=12,len=0.5))
+                coloraxis_colorbar=dict(title="Non conformités",thickness=12,len=0.5))
             st.plotly_chart(fig, use_container_width=True)
     with col_bar:
         st.subheader("Top 15 départements")
         top = dept_stats.sort_values('alertes', ascending=False).head(15)
         fig_b = px.bar(top, x='alertes', y='dept', orientation='h',
             color='taux', color_continuous_scale=["#fed7aa","#ea580c","#7c2d12"],
-            text='alertes', labels={'alertes':'Alertes','dept':'Dept','taux':'% alerte'})
+            text='alertes', labels={'alertes':'Non conformités','dept':'Dept','taux':'% non conforme'})
         fig_b.update_traces(textposition='outside')
         fig_b.update_layout(height=400, margin=dict(t=10,b=10),
             yaxis=dict(autorange='reversed'),
-            coloraxis_colorbar=dict(title="% alerte",thickness=10))
+            coloraxis_colorbar=dict(title="% non conforme",thickness=10))
         st.plotly_chart(fig_b, use_container_width=True)
 
     col_t, col_s = st.columns(2)
@@ -521,50 +521,88 @@ with tab_carte:
 # ── ONGLET 4 : MÉTHODOLOGIE ───────────────────────────────────
 with tab_methodo:
     st.markdown("""
-### Score de périmètre L228-2 (0 à 5)
+### 🧠 Fonctionnement de l'algorithme VeloGuard
 
-| Condition | Points |
-|---|---|
-| Descripteur "Voirie" ou "Voirie et réseaux divers" (marché mono ou bi-lot) | **+2** |
-| Même descripteur dans un accord-cadre 5–8 lots | **+1** |
-| Voirie noyée dans accord-cadre TCE (> 8 lots) | **0** |
-| Descripteur "Chaussée", "Trottoir", "Revêtement" (≤ 4 lots) | **+1** |
-| Objet : réfection/réaménagement + voirie/rue/avenue/chaussée | **+1** |
-| Objet : bâtiment, FTTH, toiture, hôpital, pharmacie, cimetière, aéroport… | **−3** |
-| Objet : autoroute, voie rapide, 2×2 voies, pont/viaduc sur RN/RD, échangeur | **−3** |
-| Objet : construction neuve + bâtiment/logements | **−1** |
+L'application VeloGuard repose sur un algorithme de traitement automatisé des annonces du **BOAMP (Bulletin Officiel des Annonces des Marchés Publics)** pour identifier les manquements potentiels à l'**article L228-2 du Code de l'environnement** (issu de la loi LOM).
 
-**Seuil : score ≥ 2 = dans le périmètre L228-2**
-
-> Les routes départementales et nationales **en agglomération** restent dans le périmètre
-> (la loi exclut autoroutes et voies rapides, pas les RD/RN en zone urbaine).
+L'analyse s'effectue en **3 étapes clés** :
 
 ---
 
-### Détection d'aménagement cyclable
+### 1️⃣ Étape 1 : Calcul du score de périmètre L228-2 (0 à 5)
 
-L'analyse porte sur le **titre** (`objet`) et la **description structurée** (`donnees`) de l'annonce.
-Le texte intégral du CCTP n'est pas disponible via l'API.
+L'article L228-2 impose la réalisation d'itinéraires cyclables lors de toute **réfection ou création de voie urbaine**. 
+L'algorithme évalue l'objet du marché et ses descripteurs CPV/BOAMP pour déterminer si le marché entre dans ce périmètre d'obligation.
 
-Mots recherchés : *piste cyclable, bande cyclable, voie verte, véloroute, vélo, cycliste,
-aménagement cyclable, arceaux vélo, abri vélo, mode doux, L228-2…*
+| Critère d'évaluation | Variation de score | Explications / Motifs |
+|---|:---:|---|
+| **Descripteur majeur "Voirie"** | **+2 pts** | Indique un marché centré sur la voirie (marché mono-lot ou bi-lot). |
+| **Descripteur "Voirie" en accord-cadre** | **+1 pt** | Descripteur présent dans un accord-cadre multi-lots (5 à 8 lots). |
+| **Descripteur "Voirie" noyé dans un TCE** | **0 pt** | Marché Tous Corps d'État (> 8 lots) où la voirie n'est qu'accessoire. |
+| **Descripteurs secondaires** | **+1 pt** | Présence de mots-clés comme *"Chaussée"*, *"Trottoir"*, *"Revêtement"* (≤ 4 lots). |
+| **Mots-clés de réfection/réaménagement** | **+1 pt** | Intitulé ciblant une réfection/aménagement (*réfection*, *réhabilitation*, *enrobé*, *giratoire*...). |
+| **Exclusions bâtiment & réseaux** | **−3 pts** | Bâtiment, FTTH, eau/gaz, assainissement, cimetière, aéroport, désamiantage, etc. |
+| **Exclusions hors agglomération / infrastructures** | **−3 pts** | Autoroutes, voies rapides, 2x2 voies, échangeurs, ponts/viaducs sur RN/RD hors agglomération. |
+| **Construction neuve non routière** | **−1 pt** | Logements ou bâtiments neufs. |
+
+> 🎯 **Décision de périmètre** :
+> - **Score ≥ 2** ➔ **Marché DANS le périmètre L228-2** (Obligation légale très probable).
+> - **Score < 2** ➔ **Marché HORS périmètre L228-2** (Travaux secondaires, bâtiment ou hors agglomération).
 
 ---
 
-### Classification des résultats
+### 2️⃣ Étape 2 : Détection des aménagements cyclables & Faux positifs
 
-| Catégorie | Définition |
-|---|---|
-| ⚠️ **Alerte L228-2** | Score ≥ 2 ET aucune mention cyclable → à vérifier |
-| ✅ **Conforme L228-2** | Score ≥ 2 ET mention cyclable pertinente |
-| 🚲 **Projet vélo pur** | Mention cyclable mais hors périmètre L228-2 (projet dédié) |
+L'algorithme parcourt le titre du marché (`objet`) et sa description synthétique (`donnees`) à la recherche d'éléments attestant de la prise en compte du vélo.
+
+* **Recherche de mots-clés cyclables** : *piste cyclable, bande cyclable, voie verte, véloroute, aménagement cyclable, itinéraire cyclable, stationnement vélo, arceaux vélo, abri vélo, mode doux, cheminement doux, L228-2...*
+* **Filtrage des faux conformes** :
+  Certains marchés mentionnent du vélo mais ne répondent pas à l'obligation de voie cyclable sur la chaussée. Ils sont neutralisés si l'objet concerne :
+  - Les cours d'écoles, collèges ou lycées (ex: *abri vélo dans la cour du collège*)
+  - Les rénovations énergétiques, centres aquatiques, ombrières photovoltaïques
+  - Les foyers ou résidences étudiantes
 
 ---
 
-### Source des données
+### 3️⃣ Étape 3 : Dispatching et classification des marchés
 
-API BOAMP / DILA — [boamp-datadila.opendatasoft.com](https://boamp-datadila.opendatasoft.com)
-Licence ouverte v2.0 (Etalab) · Mise à jour 2×/jour
+En croisant le **score de périmètre** (seuil à 2) et la **détection d'une mention cyclable** (hors faux conformes), l'algorithme catégorise automatiquement chaque marché public :
+
+| Score Périmètre | Mention Cyclable Valide | Catégorie attribuée | Statut & Signification |
+|:---:|:---:|:---:|---|
+| **≥ 2** *(Périmètre L228-2)* | ❌ **Non** | ⚠️ **Alerte L228-2** | **Non conforme suspecté** — Réaménagement de voirie sans volet cyclable identifié. |
+| **≥ 2** *(Périmètre L228-2)* | ✅ **Oui** | ✅ **Conforme L228-2** | **Conforme** — Réaménagement de voirie intégrant un aménagement cyclable. |
+| **< 2** *(Hors périmètre)* | ✅ **Oui** | 🚲 **Projet vélo pur** | **Projet spécifique** — Aménagement cyclable dédié hors réfection de chaussée classique. |
+| **< 2** *(Hors périmètre)* | ❌ **Non** | *(Hors périmètre)* | **Exclu** — Travaux non soumis à l'obligation L228-2 (bâtiment, réseaux, etc.). |
+
+#### 📋 Détail des catégories :
+
+1. ⚠️ **Alerte L228-2 (Non conforme suspecté)**
+   - **Conditions** : `Score périmètre ≥ 2` **ET** `Aucune mention cyclable valide`.
+   - **Interpretation** : Travaux de voirie urbaine identifiés sans aucune trace d'aménagement cyclable au BOAMP. Ces marchés nécessitent une vigilance et un contrôle prioritaire par les associations.
+
+2. ✅ **Conforme L228-2**
+   - **Conditions** : `Score périmètre ≥ 2` **ET** `Mention cyclable valide détectée`.
+   - **Interpretation** : Requalification de voirie respectant l'article L228-2 en prévoyant explicitement un volet cyclable.
+
+3. 🚲 **Projet vélo pur**
+   - **Conditions** : `Score périmètre < 2` **ET** `Mention cyclable valide détectée`.
+   - **Interpretation** : Marché dédié spécifiquement au vélo ou à des équipements mobilités (ex: création d'une voie verte autonome, fourniture d'arceaux vélo, location de vélos...).
+
+---
+
+### ⚠️ Limites méthodologiques
+
+* **Portée de la recherche** : Seul le texte récapitulatif fourni par l'API BOAMP (titre et résumé `donnees`) est analysé. Les documents détaillés du CCTP (Cahier des Clauses Techniques Particulières) ne sont pas accessibles automatiquement.
+* **Vérification recommandée** : Une mention cyclable peut être absente du titre tout en étant présente dans le CCTP, et inversement. Il est vivement conseillé de cliquer sur le lien BOAMP pour vérifier l'avis d'appel d'offres officiel avant toute démarche auprès de l'acheteur public.
+
+---
+
+### 📊 Source & Fréquence des données
+
+* **Source** : API BOAMP / DILA — [boamp-datadila.opendatasoft.com](https://boamp-datadila.opendatasoft.com)
+* **Licence** : Licence Ouverte v2.0 (Etalab)
+* **Mise à jour** : Traitement et actualisation automatisés 2 fois par jour.
     """)
 
 # ── FOOTER ────────────────────────────────────────────────────
