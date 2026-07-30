@@ -323,7 +323,7 @@ if "filter_q" not in st.session_state:
     st.session_state["filter_q"] = st.query_params.get("q", "")
 
 st.sidebar.title("🔍 Filtres")
-texte = st.sidebar.text_input("Recherche dans l'objet", key="filter_q", placeholder="réfection, avenue…")
+texte = st.sidebar.text_input("Recherche (objet ou acheteur)", key="filter_q", placeholder="Objet, acheteur")
 plage = st.sidebar.date_input("Période", key="filter_plage", min_value=d_min, max_value=d_max)
 sel_perimetre = st.sidebar.selectbox("Périmètre L228-2", perimetre_options, key="filter_perimetre")
 sel_depts = st.sidebar.multiselect("Département(s)", available_depts, key="filter_depts", placeholder="Tous")
@@ -371,7 +371,11 @@ if sel_perimetre == "Dans le périmètre":
     mask &= df['dans_perimetre']
 elif sel_perimetre == "Hors périmètre":
     mask &= ~df['dans_perimetre']
-if texte:     mask &= df['objet'].str.contains(texte, case=False, na=False)
+if texte:
+    mask &= (
+        df['objet'].fillna('').str.contains(texte, case=False, na=False) |
+        df['nomacheteur'].fillna('').str.contains(texte, case=False, na=False)
+    )
 dff = df[mask].copy()
 
 # Reset pagination sur changement de filtres
