@@ -165,7 +165,7 @@ def load_geo():
         return None
 
 uploaded = st.sidebar.file_uploader("📂 Fichier CSV VeloGuard", type="csv")
-csv_local = sorted(Path(".").glob("boamp_voirie_*.csv"))
+csv_local = sorted(Path("data").glob("boamp_voirie_*.csv")) or sorted(Path(".").glob("boamp_voirie_*.csv"))
 if uploaded:   df = load(uploaded)
 elif csv_local: df = load(str(csv_local[-1]))
 else:

@@ -1,11 +1,9 @@
-import requests, pandas as pd, json, time, re, ast
+import requests, pandas as pd, json, time, re, ast, argparse
 from datetime import datetime, timedelta
 from pathlib import Path
 from collections import Counter
 
 BASE_URL = "https://boamp-datadila.opendatasoft.com/api/explore/v2.1/catalog/datasets/boamp/records"
-JOURS_ARRIERE = 365
-OUTPUT_FILE = f"boamp_voirie_{datetime.now().strftime('%Y%m%d')}.csv"
 
 KEYWORDS_CYCLABLE = [
     r'piste cyclable', r'bande cyclable', r'voie cyclable',
@@ -186,10 +184,13 @@ def fetch_period(date_start_str, date_end_str):
         time.sleep(0.2)
     return records
 
-def collect_12_months():
+def collect_data(jours=365):
     end_date = datetime.now()
-    start_date = end_date - timedelta(days=JOURS_ARRIERE)
-    print(f"Collecte BOAMP sur 12 mois ({start_date.strftime('%Y-%m-%d')} -> {end_date.strftime('%Y-%m-%d')})...")
+    start_date = end_date - timedelta(days=jours)
+    output_dir = Path("data")
+    output_dir.mkdir(exist_ok=True)
+    output_file = output_dir / f"boamp_voirie_{datetime.now().strftime('%Y%m%d')}.csv"
+    print(f"Collecte BOAMP sur {jours} jours ({start_date.strftime('%Y-%m-%d')} -> {end_date.strftime('%Y-%m-%d')})...")
 
     # Découpage par mois pour contourner les limites d'offset de l'API Opendatasoft (10 000 max)
     all_records = []
@@ -266,9 +267,17 @@ def collect_12_months():
     cols_existantes = [c for c in cols_export if c in df.columns]
     df_export = df[cols_existantes]
 
-    output_path = Path(OUTPUT_FILE)
-    df_export.to_csv(output_path, index=False)
-    print(f"Fichier sauvegardé avec succès : {OUTPUT_FILE} ({len(df_export)} lignes)")
+    output_path = Path(output_file)
+    df_export.to_csv(output_path, index=False, lineterminator='\n')
+    print(f"Fichier sauvegardé avec succès : {output_file} ({len(df_export)} lignes)")
 
 if __name__ == '__main__':
-    collect_12_months()
+    parser = argparse.ArgumentParser(description="Collecte des données BOAMP pour l'observatoire L228-2.")
+    parser.add_argument(
+        '--jours', '-j',
+        type=int,
+        default=365,
+        help="Nombre de jours de recul pour la collecte (ex: 30 pour 30 jours, 365 par défaut)."
+    )
+    args = parser.parse_args()
+    collect_data(jours=args.jours)

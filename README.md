@@ -20,39 +20,71 @@ VeloGuard collecte automatiquement les marchés publics de travaux publiés au B
 ```
 veloguard/
 ├── app.py                                    # Dashboard Streamlit
-├── VeloGuard_01_Collecte_BOAMP_v7.ipynb      # Notebook de collecte (Google Colab)
+├── collect_boamp.py                          # Script de collecte des données BOAMP
 ├── requirements.txt                          # Dépendances Python
 ├── README.md
-├── .github/
-│   └── workflows/
-│       └── collect_boamp.yml                 # Automatisation hebdomadaire
 └── data/
-    └── boamp_voirie_YYYYMMDD.csv             # Fichiers collectés
+    └── boamp_voirie_YYYYMMDD.csv             # Fichiers de données collectés
 ```
 
 ---
 
-## Installation et lancement
+## Installation et démarrage rapide
 
-### Prérequis
+### 1. Cloner le projet & créer l'environnement virtuel
 
-- Python 3.10+
-- Un compte GitHub
-- Un compte [Streamlit Cloud](https://share.streamlit.io) (gratuit)
+```bash
+git clone <URL_DU_REPO>
+cd conformite_voirie
 
-### En local
+# Création de l'environnement virtuel
+python3 -m venv .venv
+
+# Activation de l'environnement virtuel
+# Sur Linux / macOS :
+source .venv/bin/activate
+# Sur Windows (PowerShell) :
+# .venv\Scripts\Activate.ps1
+```
+
+### 2. Installer les dépendances
 
 ```bash
 pip install -r requirements.txt
-# Placer un fichier boamp_voirie_YYYYMMDD.csv dans le même dossier
+```
+
+### 3. Collecter les données (Scraper le BOAMP)
+
+Exécutez le script `collect_boamp.py` en spécifiant le nombre de jours à remonter :
+
+```bash
+# Collecte des 30 derniers jours (recommandé pour un test rapide)
+python collect_boamp.py --jours 30
+
+# Collecte sur 1 an (365 jours par défaut)
+python collect_boamp.py
+
+# Afficher l'aide
+python collect_boamp.py --help
+```
+
+Le script crée automatiquement le dossier `data/` si nécessaire et y génère un fichier CSV daté du jour (ex: `data/boamp_voirie_20260730.csv`).
+
+### 4. Lancer l'application Streamlit
+
+```bash
 streamlit run app.py
 ```
 
-### Déploiement sur Streamlit Cloud
+L'application s'ouvre automatiquement dans votre navigateur à l'adresse `http://localhost:8501`.
 
-1. Pousser ce repo sur GitHub avec `app.py`, `requirements.txt` et un CSV dans `data/`
+---
+
+## Déploiement sur Streamlit Cloud
+
+1. Pousser ce repo sur GitHub avec `app.py`, `collect_boamp.py`, `requirements.txt` et un CSV généré à la racine.
 2. Se connecter sur [share.streamlit.io](https://share.streamlit.io)
-3. **New app** → sélectionner le repo → fichier principal : `app.py` → **Deploy**
+3. **New app** → Sélectionner le repo → Fichier principal : `app.py` → **Deploy**
 
 ---
 
@@ -60,19 +92,14 @@ streamlit run app.py
 
 ### Source
 
-**API BOAMP / DILA** — [boamp-datadila.opendatasoft.com](https://boamp-datadila.opendatasoft.com)
+**API BOAMP / DILA** — [boamp-datadila.opendatasoft.com](https://boamp-datadila.opendatasoft.com)  
 Gratuite, sans clé, Licence ouverte v2.0 (Etalab).
 
-### Paramètres recommandés (notebook v7)
+### Options du script `collect_boamp.py`
 
-```python
-JOURS_ARRIERE = 45      # fenêtre glissante — 30 jours peut manquer des publications récentes
-MAX_RESULTATS = 5000    # pas de plafond artificiel
-```
+- `--jours` / `-j` : Nombre de jours de recul pour la collecte (ex: `--jours 30` pour 30 jours, `365` par défaut).
 
-> **Pourquoi 45 jours ?** Les numéros d'idweb BOAMP sont séquentiels. Un marché publié
-> le 28 mars peut avoir un numéro inférieur aux marchés du 30 mars présents dans le CSV,
-> et donc être manqué si la fenêtre est trop courte. 45 jours offre une marge suffisante.
+> **Pourquoi remonter au moins 30-45 jours ?** Les numéros d'idweb BOAMP sont séquentiels. Remonter suffisamment dans le temps garantit de ne pas louper de marchés récents publiés avec un décalage d'indexation.
 
 ### Ce qui est collecté
 
