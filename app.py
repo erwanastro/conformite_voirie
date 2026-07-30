@@ -136,7 +136,7 @@ def est_faux_conforme(row):
     objet = str(row.get('objet', ''))
     return any(re.search(p, objet, re.IGNORECASE) for p in FAUX_CONF_PATTERNS)
 
-def render_pagination(current_page, total_pages, key_prefix="alertes"):
+def render_pagination(current_page, total_pages, key_prefix="alertes", state_key="alertes_page"):
     if total_pages <= 1:
         return current_page
 
@@ -182,7 +182,7 @@ def render_pagination(current_page, total_pages, key_prefix="alertes"):
                         new_page = item
 
     if new_page != current_page:
-        st.session_state[f"{key_prefix}_page"] = new_page
+        st.session_state[state_key] = new_page
         st.query_params["page"] = str(new_page)
         st.rerun()
 
@@ -228,6 +228,21 @@ def load(path):
             return 'L228-2 ✅' if row['dans_perimetre'] else 'Projet vélo pur 🚲'
         return ''
     df['categorie_velo'] = df.apply(categorie, axis=1)
+
+    def categorie_statut(row):
+        if row['dans_perimetre']:
+            if row['vrai_conforme']:
+                return '✅ Conforme L228-2'
+            elif row['cyclable_detecte']:
+                return '⚠️ Faux conforme'
+            else:
+                return '⚠️ Alerte L228-2'
+        else:
+            if row['cyclable_detecte'] and not row['faux_conforme']:
+                return '🚲 Projet vélo pur'
+            else:
+                return 'Hors périmètre'
+    df['statut_libelle'] = df.apply(categorie_statut, axis=1)
     return df
 
 @st.cache_data(ttl=86400)
@@ -239,12 +254,11 @@ def load_geo():
     except:
         return None
 
-uploaded = st.sidebar.file_uploader("📂 Fichier CSV VeloGuard", type="csv")
 csv_local = sorted(Path("data").glob("boamp_voirie_*.csv")) or sorted(Path(".").glob("boamp_voirie_*.csv"))
-if uploaded:   df = load(uploaded)
-elif csv_local: df = load(str(csv_local[-1]))
+if csv_local:
+    df = load(str(csv_local[-1]))
 else:
-    st.error("Aucun fichier CSV. Chargez-en un via la sidebar.")
+    st.error("Aucun fichier CSV trouvé dans `data/`. Exécutez `python collect_boamp.py` pour collecter les données.")
     st.stop()
 
 geo = load_geo()
@@ -285,23 +299,35 @@ if "filter_types" not in st.session_state:
     else:
         st.session_state["filter_types"] = []
 
-if "filter_score" not in st.session_state:
+perimetre_options = ["Tous", "Dans le périmètre", "Hors périmètre"]
+if "filter_perimetre" not in st.session_state:
+    q_perim = st.query_params.get("perimetre")
     q_score = st.query_params.get("score")
-    try:
-        sc = int(q_score) if q_score else 0
-        st.session_state["filter_score"] = min(max(0, sc), 5)
-    except:
-        st.session_state["filter_score"] = 0
+    if q_perim:
+        if q_perim.lower() in ["dans", "in", "true", "dans le périmètre", "marché dans le périmètre"]:
+            st.session_state["filter_perimetre"] = "Dans le périmètre"
+        elif q_perim.lower() in ["dehors", "hors", "out", "false", "hors périmètre", "marché hors périmètre"]:
+            st.session_state["filter_perimetre"] = "Hors périmètre"
+        else:
+            st.session_state["filter_perimetre"] = "Tous"
+    elif q_score:
+        try:
+            sc = int(q_score)
+            st.session_state["filter_perimetre"] = "Dans le périmètre" if sc >= 2 else "Tous"
+        except:
+            st.session_state["filter_perimetre"] = "Tous"
+    else:
+        st.session_state["filter_perimetre"] = "Tous"
 
 if "filter_q" not in st.session_state:
     st.session_state["filter_q"] = st.query_params.get("q", "")
 
 st.sidebar.title("🔍 Filtres")
+texte = st.sidebar.text_input("Recherche dans l'objet", key="filter_q", placeholder="réfection, avenue…")
 plage = st.sidebar.date_input("Période", key="filter_plage", min_value=d_min, max_value=d_max)
+sel_perimetre = st.sidebar.selectbox("Périmètre L228-2", perimetre_options, key="filter_perimetre")
 sel_depts = st.sidebar.multiselect("Département(s)", available_depts, key="filter_depts", placeholder="Tous")
 sel_types = st.sidebar.multiselect("Type d'acheteur", available_types, key="filter_types", placeholder="Tous")
-score_min = st.sidebar.slider("Score périmètre minimum", 0, 5, key="filter_score")
-texte = st.sidebar.text_input("Recherche dans l'objet", key="filter_q", placeholder="réfection, avenue…")
 
 # Sauvegarde des filtres dans st.query_params
 if len(plage) == 2 and (plage[0] != d_min or plage[1] != d_max):
@@ -321,9 +347,14 @@ if sel_types:
 else:
     st.query_params.pop("types", None)
 
-if score_min > 0:
-    st.query_params["score"] = str(score_min)
+if sel_perimetre == "Dans le périmètre":
+    st.query_params["perimetre"] = "dans"
+    st.query_params.pop("score", None)
+elif sel_perimetre == "Hors périmètre":
+    st.query_params["perimetre"] = "dehors"
+    st.query_params.pop("score", None)
 else:
+    st.query_params.pop("perimetre", None)
     st.query_params.pop("score", None)
 
 if texte:
@@ -336,9 +367,25 @@ if len(plage) == 2:
     mask &= (df['dateparution'] >= pd.Timestamp(plage[0])) & (df['dateparution'] <= pd.Timestamp(plage[1]))
 if sel_depts: mask &= df['dept'].isin(sel_depts)
 if sel_types: mask &= df['type_acheteur'].isin(sel_types)
-if score_min: mask &= df['score_perimetre'] >= score_min
+if sel_perimetre == "Dans le périmètre":
+    mask &= df['dans_perimetre']
+elif sel_perimetre == "Hors périmètre":
+    mask &= ~df['dans_perimetre']
 if texte:     mask &= df['objet'].str.contains(texte, case=False, na=False)
 dff = df[mask].copy()
+
+# Reset pagination sur changement de filtres
+current_filters = (
+    tuple(plage) if isinstance(plage, (list, tuple)) else plage,
+    tuple(sel_depts) if sel_depts else (),
+    tuple(sel_types) if sel_types else (),
+    sel_perimetre,
+    texte
+)
+if st.session_state.get("last_filters") != current_filters:
+    st.session_state["last_filters"] = current_filters
+    st.session_state["alertes_page"] = 1
+    st.query_params["page"] = "1"
 
 # ── HEADER ────────────────────────────────────────────────────
 st.title("🚲 VeloGuard")
@@ -421,16 +468,25 @@ selected_idx = tab_labels.index(selected_tab_label) if selected_tab_label in tab
 active_slug = tab_slugs[selected_idx]
 st.query_params["tab"] = active_slug
 
-# ── ONGLET 1 : ALERTES ────────────────────────────────────────
+# ── ONGLET 1 : ALERTES & MARCHÉS ──────────────────────────────
 if active_slug == "alertes":
-    alertes_dff = dff[dff['alerte_l228']].copy()
+    if sel_perimetre == "Hors périmètre":
+        alertes_dff = dff.copy()
+        header_text = f"**{len(alertes_dff)} marchés hors périmètre L228-2** (bâtiment, toiture, réseaux...)"
+    elif sel_perimetre == "Tous":
+        alertes_dff = dff.copy()
+        header_text = f"**{len(alertes_dff)} marchés au total** (tous périmètres)"
+    else:
+        alertes_dff = dff[dff['alerte_l228']].copy()
+        header_text = f"**{len(alertes_dff)} marchés de voirie urbaine sans mention d'aménagement cyclable** — soumis à l'obligation L228-2"
+
     if alertes_dff.empty:
-        st.markdown(f"**{n_a} marchés de voirie urbaine sans mention d'aménagement cyclable** — soumis à l'obligation L228-2")
-        st.info("Aucune alerte avec les filtres actuels.")
+        st.markdown(header_text)
+        st.info("Aucun marché avec les filtres actuels.")
     else:
         cols_map = {
             'dateparution':'Publication', 'datelimitereponse':'Date limite',
-            'dept':'Dept', 'score_perimetre':'Score',
+            'dept':'Dept', 'score_perimetre':'Score', 'statut_libelle':'Statut',
             'nomacheteur':'Acheteur', 'type_acheteur':"Type d'acheteur", 'objet':'Objet',
             'procedure_libelle':'Procédure', 'descripteur_str':'Descripteurs',
             'url_avis':'BOAMP', 'url_pdf':'Extrait PDF'
@@ -466,36 +522,40 @@ if active_slug == "alertes":
 
         col_title, col_info = st.columns([3, 2])
         with col_title:
-            st.markdown(f"**{n_a} marchés de voirie urbaine sans mention d'aménagement cyclable** — soumis à l'obligation L228-2")
+            st.markdown(header_text)
         with col_info:
             st.markdown(
                 f"<div style='text-align: right; font-size: 13px; color: #4b5563; padding-top: 2px;'>"
-                f"Affichage de <strong>{ITEMS_PER_PAGE}</strong> par page · Page <strong>{st.session_state.alertes_page}</strong> sur <strong>{total_pages}</strong> ({total_items} alertes au total)"
+                f"Affichage de <strong>{ITEMS_PER_PAGE}</strong> par page · Page <strong>{st.session_state.alertes_page}</strong> sur <strong>{total_pages}</strong> ({total_items} marchés au total)"
                 f"</div>",
                 unsafe_allow_html=True
             )
+
+        render_pagination(st.session_state.alertes_page, total_pages, key_prefix="alertes_top")
 
         start_idx = (st.session_state.alertes_page - 1) * ITEMS_PER_PAGE
         end_idx = start_idx + ITEMS_PER_PAGE
         disp_page = disp.iloc[start_idx:end_idx]
 
         st.dataframe(
-            disp_page, use_container_width=True, height=500,
+            disp_page, key=f"df_alertes_p{st.session_state.alertes_page}",
+            use_container_width=True, height=500,
             column_config={
                 "BOAMP":          st.column_config.LinkColumn("BOAMP", display_text="🌐 Avis BOAMP"),
                 "Extrait PDF":    st.column_config.LinkColumn("Extrait PDF", display_text="📄 PDF Extrait"),
                 "Objet":          st.column_config.TextColumn(width="large"),
                 "Acheteur":       st.column_config.TextColumn(width="medium"),
                 "Type d'acheteur":st.column_config.TextColumn(width="small"),
+                "Statut":         st.column_config.TextColumn(width="medium"),
                 "Score":          st.column_config.NumberColumn(format="%d ⭐"),
             }
         )
 
-        render_pagination(st.session_state.alertes_page, total_pages, key_prefix="alertes")
+        render_pagination(st.session_state.alertes_page, total_pages, key_prefix="alertes_bottom")
 
         csv_dl = alertes_dff.to_csv(index=False, encoding='utf-8-sig').encode('utf-8-sig')
-        st.download_button("⬇️ Télécharger les alertes (CSV)", data=csv_dl,
-            file_name=f"veloguard_alertes_{datetime.now().strftime('%Y%m%d')}.csv", mime="text/csv")
+        st.download_button(f"⬇️ Télécharger ces {len(alertes_dff)} marchés (CSV)", data=csv_dl,
+            file_name=f"veloguard_selection_{datetime.now().strftime('%Y%m%d')}.csv", mime="text/csv")
 
 # ── ONGLET 2 : COMMUNES ACTIVES ───────────────────────────────
 elif active_slug == "communes":

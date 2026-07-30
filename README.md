@@ -192,7 +192,7 @@ Ce taux est cohérent avec les observations de terrain sur l'application de la L
 - **🗺️ Carte & stats** : choroplèthe par département, timeline, distribution des scores.
 - **📐 Méthodologie** : explication complète du scoring.
 
-Filtres disponibles : département, période, score minimum, recherche textuelle.
+Filtres disponibles : département, période, périmètre L228-2 (dans/hors périmètre), recherche textuelle.
 
 ---
 
