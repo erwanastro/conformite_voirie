@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-import re, ast, requests, json
+import re, ast, requests, json, math
 from pathlib import Path
 from datetime import datetime
 from collections import Counter
@@ -27,6 +27,18 @@ st.markdown("""
 .projet-pur {
     background:#ebf8ff; border-left:3px solid #3182ce;
     padding:8px 12px; border-radius:0 8px 8px 0; margin-bottom:6px;
+}
+div[data-testid="stColumn"] button {
+    min-height: 28px !important;
+    height: 28px !important;
+    padding: 0px 2px !important;
+    font-size: 12px !important;
+    border-radius: 6px !important;
+    margin-top: 0px !important;
+    margin-bottom: 0px !important;
+}
+div[data-testid="stDataFrame"] {
+    margin-bottom: 0px !important;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -123,6 +135,57 @@ def est_faux_conforme(row):
     if not row.get('cyclable_detecte'): return False
     objet = str(row.get('objet', ''))
     return any(re.search(p, objet, re.IGNORECASE) for p in FAUX_CONF_PATTERNS)
+
+def render_pagination(current_page, total_pages, key_prefix="alertes"):
+    if total_pages <= 1:
+        return current_page
+
+    if total_pages <= 7:
+        page_nums = list(range(1, total_pages + 1))
+    else:
+        pages_set = {1, 2, total_pages - 1, total_pages}
+        pages_set.update({max(1, current_page - 1), current_page, min(total_pages, current_page + 1)})
+        sorted_p = sorted(list(pages_set))
+        page_nums = []
+        for i, p in enumerate(sorted_p):
+            if i > 0 and p > sorted_p[i-1] + 1:
+                page_nums.append("...")
+            page_nums.append(p)
+
+    items = ["«", "‹"] + page_nums + ["›", "»"]
+
+    _, center_col, _ = st.columns([1, 2.5, 1])
+    new_page = current_page
+
+    with center_col:
+        cols = st.columns(len(items))
+        for idx, (col, item) in enumerate(zip(cols, items)):
+            with col:
+                if item == "«":
+                    if st.button("«", key=f"{key_prefix}_first", disabled=(current_page == 1), use_container_width=True):
+                        new_page = 1
+                elif item == "‹":
+                    if st.button("‹", key=f"{key_prefix}_prev", disabled=(current_page == 1), use_container_width=True):
+                        new_page = current_page - 1
+                elif item == "›":
+                    if st.button("›", key=f"{key_prefix}_next", disabled=(current_page == total_pages), use_container_width=True):
+                        new_page = current_page + 1
+                elif item == "»":
+                    if st.button("»", key=f"{key_prefix}_last", disabled=(current_page == total_pages), use_container_width=True):
+                        new_page = total_pages
+                elif item == "...":
+                    st.button("…", key=f"{key_prefix}_dots_{idx}", disabled=True, use_container_width=True)
+                else:
+                    is_active = (item == current_page)
+                    b_type = "primary" if is_active else "secondary"
+                    if st.button(str(item), key=f"{key_prefix}_page_{item}", type=b_type, use_container_width=True):
+                        new_page = item
+
+    if new_page != current_page:
+        st.session_state[f"{key_prefix}_page"] = new_page
+        st.rerun()
+
+    return new_page
 
 # ── CHARGEMENT ────────────────────────────────────────────────
 @st.cache_data(ttl=3600)
@@ -244,10 +307,9 @@ tab_alertes, tab_communes, tab_carte, tab_methodo = st.tabs([
 
 # ── ONGLET 1 : ALERTES ────────────────────────────────────────
 with tab_alertes:
-    st.markdown(f"**{n_a} marchés de voirie urbaine sans mention d'aménagement cyclable** — soumis à l'obligation L228-2")
-
     alertes_dff = dff[dff['alerte_l228']].copy()
     if alertes_dff.empty:
+        st.markdown(f"**{n_a} marchés de voirie urbaine sans mention d'aménagement cyclable** — soumis à l'obligation L228-2")
         st.info("Aucune alerte avec les filtres actuels.")
     else:
         cols_map = {
@@ -266,8 +328,35 @@ with tab_alertes:
                 lambda d: d.strftime('%d/%m/%Y %H:%M') if pd.notna(d) else ''
             )
         disp = disp.rename(columns=cols_map).sort_values('Score', ascending=False)
+
+        # Pagination : 25 éléments par page
+        ITEMS_PER_PAGE = 25
+        total_items = len(disp)
+        total_pages = max(1, math.ceil(total_items / ITEMS_PER_PAGE))
+
+        if "alertes_page" not in st.session_state:
+            st.session_state.alertes_page = 1
+
+        if st.session_state.alertes_page > total_pages:
+            st.session_state.alertes_page = total_pages
+
+        col_title, col_info = st.columns([3, 2])
+        with col_title:
+            st.markdown(f"**{n_a} marchés de voirie urbaine sans mention d'aménagement cyclable** — soumis à l'obligation L228-2")
+        with col_info:
+            st.markdown(
+                f"<div style='text-align: right; font-size: 13px; color: #4b5563; padding-top: 2px;'>"
+                f"Affichage de <strong>{ITEMS_PER_PAGE}</strong> par page · Page <strong>{st.session_state.alertes_page}</strong> sur <strong>{total_pages}</strong> ({total_items} alertes au total)"
+                f"</div>",
+                unsafe_allow_html=True
+            )
+
+        start_idx = (st.session_state.alertes_page - 1) * ITEMS_PER_PAGE
+        end_idx = start_idx + ITEMS_PER_PAGE
+        disp_page = disp.iloc[start_idx:end_idx]
+
         st.dataframe(
-            disp, use_container_width=True, height=500,
+            disp_page, use_container_width=True, height=500,
             column_config={
                 "BOAMP":      st.column_config.LinkColumn("BOAMP", display_text="🌐 Avis BOAMP"),
                 "Extrait PDF":st.column_config.LinkColumn("Extrait PDF", display_text="📄 PDF Extrait"),
@@ -276,6 +365,9 @@ with tab_alertes:
                 "Score":      st.column_config.NumberColumn(format="%d ⭐"),
             }
         )
+
+        render_pagination(st.session_state.alertes_page, total_pages, key_prefix="alertes")
+
         csv_dl = alertes_dff.to_csv(index=False, encoding='utf-8-sig').encode('utf-8-sig')
         st.download_button("⬇️ Télécharger les alertes (CSV)", data=csv_dl,
             file_name=f"veloguard_alertes_{datetime.now().strftime('%Y%m%d')}.csv", mime="text/csv")
