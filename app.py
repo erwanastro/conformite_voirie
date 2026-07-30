@@ -7,6 +7,7 @@ from pathlib import Path
 from datetime import datetime
 from collections import Counter
 from annotations import load_annotations, save_annotation
+from collect_boamp import collect_data
 
 st.set_page_config(
     page_title="VeloGuard — Conformité L228-2",
@@ -346,6 +347,20 @@ if "filter_q" not in st.session_state:
     st.session_state["filter_q"] = st.query_params.get("q", "")
 
 st.sidebar.title("🔍 Filtres")
+
+# ── COLLECTE BOAMP DANS LA SIDEBAR ────────────────────────────
+with st.sidebar.expander("🔄 Collecte BOAMP", expanded=False):
+    nb_jours = st.number_input("Nombre de jours à scrapper", min_value=1, max_value=365, value=30, step=1, help="Nombre de jours de recul à collecter depuis l'API BOAMP.")
+    if st.button("🚀 Lancer la collecte", use_container_width=True):
+        with st.spinner(f"Collecte BOAMP en cours sur {nb_jours} jour(s). Cela peut prendre quelques minutes..."):
+            try:
+                collect_data(jours=int(nb_jours))
+                st.cache_data.clear()
+                st.success("Collecte effectuée avec succès !")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Erreur lors de la collecte : {e}")
+
 texte = st.sidebar.text_input("Recherche (objet, acheteur)", key="filter_q", placeholder="Strasbourg, avenue des Pays-Bas")
 plage = st.sidebar.date_input("Période", key="filter_plage", min_value=d_min, max_value=d_max)
 sel_perimetre = st.sidebar.selectbox("Périmètre L228-2", perimetre_options, key="filter_perimetre")
