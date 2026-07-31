@@ -60,7 +60,7 @@ def load_annotations() -> pd.DataFrame:
                     'commentaire': ''
                 })
         except Exception as e:
-            st.warning(f"Impossible de charger Google Sheets: {e}. Bascule sur SQLite local.")
+            st.error(f"Impossible de charger Google Sheets: {e}. Ne faites pas de changements si vous voyez ce message, ils seront perdus.")
 
     # 2. Option par défaut: SQLite local
     init_db()

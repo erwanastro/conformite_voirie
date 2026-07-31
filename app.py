@@ -315,7 +315,7 @@ if "filter_types" not in st.session_state:
         st.session_state["filter_types"] = []
 
 perimetre_options = ["Tous", "Dans le périmètre", "Hors périmètre"]
-relecture_options = ["Tous", "🔳 Non relu", "❎ Pas conforme (L 228-2)", "✅ Conforme (L 228-2)"]
+relecture_options = ["Tous", "🔳 Non relu", "✅ Conforme (L 228-2)", "❎ Pas conforme (L 228-2)", "⚠️ Hors agglomération (L 228-3)"]
 
 if "filter_perimetre" not in st.session_state:
     q_perim = st.query_params.get("perimetre")
@@ -424,6 +424,17 @@ if texte:
         df['idweb'].fillna('').astype(str).str.contains(texte, case=False, na=False)
     )
 dff = df[mask].copy()
+
+# Bouton d'export CSV filtré dans la sidebar
+st.sidebar.divider()
+csv_dl = dff.to_csv(index=False, encoding='utf-8-sig').encode('utf-8-sig')
+st.sidebar.download_button(
+    f"⬇️ Télécharger la sélection ({len(dff)} marchés CSV)",
+    data=csv_dl,
+    file_name=f"veloguard_selection_{datetime.now().strftime('%Y%m%d')}.csv",
+    mime="text/csv",
+    use_container_width=True
+)
 
 # Reset pagination sur changement de filtres
 current_filters = (
@@ -586,7 +597,6 @@ if active_slug == "alertes":
                 unsafe_allow_html=True
             )
 
-        render_pagination(st.session_state.alertes_page, total_pages, key_prefix="alertes_top")
 
         start_idx = (st.session_state.alertes_page - 1) * ITEMS_PER_PAGE
         end_idx = start_idx + ITEMS_PER_PAGE
@@ -599,7 +609,7 @@ if active_slug == "alertes":
                 "ID BOAMP":       st.column_config.TextColumn(" ", width="small"),
                 "Relecture":      st.column_config.SelectboxColumn(
                     "Relecture",
-                    options=["🔳 Non relu", "❎ Pas conforme (L 228-2)", "✅ Conforme (L 228-2)"],
+                    options=["🔳 Non relu", "✅ Conforme (L 228-2)", "❎ Pas conforme (L 228-2)", "⚠️ Hors agglomération (L 228-3)"],
                     default="🔳 Non relu", required=True, width="medium"
                 ),
                 "Commentaire":    st.column_config.TextColumn("Commentaire", width="large"),
@@ -633,10 +643,6 @@ if active_slug == "alertes":
             st.rerun()
 
         render_pagination(st.session_state.alertes_page, total_pages, key_prefix="alertes_bottom")
-
-        csv_dl = alertes_dff.to_csv(index=False, encoding='utf-8-sig').encode('utf-8-sig')
-        st.download_button(f"⬇️ Télécharger ces {len(alertes_dff)} marchés (CSV)", data=csv_dl,
-            file_name=f"veloguard_selection_{datetime.now().strftime('%Y%m%d')}.csv", mime="text/csv")
 
 
 # ── ONGLET 2 : COMMUNES ACTIVES ───────────────────────────────
