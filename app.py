@@ -315,7 +315,7 @@ if "filter_types" not in st.session_state:
         st.session_state["filter_types"] = []
 
 perimetre_options = ["Tous", "Dans le périmètre", "Hors périmètre"]
-relecture_options = ["Tous", "🔳 Non relu", "✅ Conforme (L 228-2)", "❎ Pas conforme (L 228-2)", "⚠️ Hors agglomération (L 228-3)"]
+relecture_options = ["Tous", "🔳 Non relu", "✅ Conforme (L 228-2)", "❎ Pas conforme (L 228-2)", "⚠️ Hors agglomération (L 228-3)", "🚫 Hors périmètre"]
 
 if "filter_perimetre" not in st.session_state:
     q_perim = st.query_params.get("perimetre")
@@ -346,6 +346,14 @@ if "filter_relecture" not in st.session_state:
 if "filter_q" not in st.session_state:
     st.session_state["filter_q"] = st.query_params.get("q", "")
 
+items_per_page_options = [25, 50, 100, 200]
+if "items_per_page" not in st.session_state:
+    q_ipp = st.query_params.get("per_page")
+    if q_ipp and q_ipp.isdigit() and int(q_ipp) in items_per_page_options:
+        st.session_state["items_per_page"] = int(q_ipp)
+    else:
+        st.session_state["items_per_page"] = 50
+
 st.sidebar.title("🔍 Filtres")
 
 # ── COLLECTE BOAMP DANS LA SIDEBAR ────────────────────────────
@@ -367,8 +375,14 @@ sel_perimetre = st.sidebar.selectbox("Périmètre L228-2", perimetre_options, ke
 sel_relecture = st.sidebar.selectbox("Statut Relecture", relecture_options, key="filter_relecture")
 sel_depts = st.sidebar.multiselect("Département(s)", available_depts, key="filter_depts", placeholder="Tous")
 sel_types = st.sidebar.multiselect("Type d'acheteur", available_types, key="filter_types", placeholder="Tous")
+items_per_page = st.sidebar.selectbox("Éléments par page", items_per_page_options, key="items_per_page")
 
 # Sauvegarde des filtres dans st.query_params
+if items_per_page != 50:
+    st.query_params["per_page"] = str(items_per_page)
+else:
+    st.query_params.pop("per_page", None)
+
 if len(plage) == 2 and (plage[0] != d_min or plage[1] != d_max):
     st.query_params["d_start"] = plage[0].strftime("%Y-%m-%d")
     st.query_params["d_end"] = plage[1].strftime("%Y-%m-%d")
@@ -567,10 +581,10 @@ if active_slug == "alertes":
             )
         disp = disp.rename(columns=cols_map).sort_values('Score', ascending=False)
 
-        # Pagination : 25 éléments par page
-        ITEMS_PER_PAGE = 25
+        # Pagination : éléments par page (50 par défaut, configurable)
+        items_per_page = st.session_state.get("items_per_page", 50)
         total_items = len(disp)
-        total_pages = max(1, math.ceil(total_items / ITEMS_PER_PAGE))
+        total_pages = max(1, math.ceil(total_items / items_per_page))
 
         if "alertes_page" not in st.session_state:
             q_page = st.query_params.get("page")
@@ -592,24 +606,25 @@ if active_slug == "alertes":
         with col_info:
             st.markdown(
                 f"<div style='text-align: right; font-size: 13px; color: #4b5563; padding-top: 2px;'>"
-                f"Affichage de <strong>{ITEMS_PER_PAGE}</strong> par page · Page <strong>{st.session_state.alertes_page}</strong> sur <strong>{total_pages}</strong> ({total_items} marchés au total)"
+                f"Affichage de <strong>{items_per_page}</strong> par page · Page <strong>{st.session_state.alertes_page}</strong> sur <strong>{total_pages}</strong> ({total_items} marchés au total)"
                 f"</div>",
                 unsafe_allow_html=True
             )
 
 
-        start_idx = (st.session_state.alertes_page - 1) * ITEMS_PER_PAGE
-        end_idx = start_idx + ITEMS_PER_PAGE
-        disp_page = disp.iloc[start_idx:end_idx]
+        start_idx = (st.session_state.alertes_page - 1) * items_per_page
+        end_idx = start_idx + items_per_page
+        disp_page = disp.iloc[start_idx:end_idx].reset_index(drop=True)
 
+        dynamic_height = 35 * (len(disp_page) + 1) + 3
         edited_df = st.data_editor(
             disp_page, key=f"df_alertes_p{st.session_state.alertes_page}",
-            use_container_width=True, height=500, hide_index=True,
+            use_container_width=True, height=dynamic_height, hide_index=True, num_rows="fixed",
             column_config={
                 "ID BOAMP":       st.column_config.TextColumn(" ", width="small"),
                 "Relecture":      st.column_config.SelectboxColumn(
                     "Relecture",
-                    options=["🔳 Non relu", "✅ Conforme (L 228-2)", "❎ Pas conforme (L 228-2)", "⚠️ Hors agglomération (L 228-3)"],
+                    options=["🔳 Non relu", "✅ Conforme (L 228-2)", "❎ Pas conforme (L 228-2)", "⚠️ Hors agglomération (L 228-3)", "🚫 Hors périmètre"],
                     default="🔳 Non relu", required=True, width="medium"
                 ),
                 "Commentaire":    st.column_config.TextColumn("Commentaire", width="large"),
@@ -626,7 +641,7 @@ if active_slug == "alertes":
 
         # Détecter et enregistrer les modifications
         changes_detected = False
-        for idx in disp_page.index:
+        for idx in range(len(disp_page)):
             old_rel = str(disp_page.loc[idx, 'Relecture']) if pd.notna(disp_page.loc[idx, 'Relecture']) else "🔳 Non relu"
             new_rel = str(edited_df.loc[idx, 'Relecture']) if pd.notna(edited_df.loc[idx, 'Relecture']) else "🔳 Non relu"
             
@@ -634,7 +649,7 @@ if active_slug == "alertes":
             new_com = str(edited_df.loc[idx, 'Commentaire']) if pd.notna(edited_df.loc[idx, 'Commentaire']) else ""
 
             if old_rel != new_rel or old_com != new_com:
-                idweb_val = str(alertes_dff.loc[idx, 'idweb'])
+                idweb_val = str(disp_page.loc[idx, 'ID BOAMP'])
                 save_annotation(idweb_val, new_rel, new_com)
                 changes_detected = True
 
