@@ -1,0 +1,47 @@
+name: Automatic BOAMP Data Collection
+
+on:
+  schedule:
+    # Runs automatically every Monday at 03:00 AM UTC
+    - cron: '0 3 * * 1'
+  # Allows manual triggering from the GitHub Actions tab
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  update-boamp-data:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests pandas
+
+      - name: Collect BOAMP data (last 3 months)
+        run: |
+          # Remove previous CSV files in data/ directory
+          rm -f data/boamp_voirie_*.csv
+          # Execute data collection for the past 90 days
+          python collect_boamp.py --jours 90
+
+      - name: Get current date
+        id: date
+        run: echo "CURRENT_DATE=$(date +'%Y-%m-%d')" >> $GITHUB_ENV
+
+      - name: Commit and push updated CSV dataset
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "chore(data): automatic update of BOAMP dataset (${{ env.CURRENT_DATE }})"
+          file_pattern: "data/boamp_voirie_*.csv"
