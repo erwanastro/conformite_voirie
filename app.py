@@ -7,7 +7,20 @@ from pathlib import Path
 from datetime import datetime
 from collections import Counter
 from annotations import load_annotations, save_annotation
-from collect_boamp import collect_data
+from collect_boamp import (
+    collect_data,
+    KEYWORDS_CYCLABLE,
+    EXCLUSIONS_CYCLABLE,
+    DESC_VOIRIE_FORT,
+    DESC_VOIRIE_FAIBLE,
+    MOTS_REFECTION,
+    EXCLUSIONS_FORTES,
+    HORS_PERIMETRE_INFRA,
+    FAUX_CONF_PATTERNS,
+    parse_descripteurs,
+    score_perimetre_l228 as score_perimetre,
+    detecter_cyclable,
+)
 
 st.set_page_config(
     page_title="VeloGuard — Conformité L228-2",
@@ -42,96 +55,20 @@ div[data-testid="stColumn"] button {
 div[data-testid="stDataFrame"] {
     margin-bottom: 0px !important;
 }
+/* Amélioration de la visibilité des barres de défilement */
+div[data-testid="stDataFrame"] ::-webkit-scrollbar {
+    height: 10px !important;
+    width: 10px !important;
+}
+div[data-testid="stDataFrame"] ::-webkit-scrollbar-thumb {
+    background-color: #94a3b8 !important;
+    border-radius: 5px !important;
+}
+div[data-testid="stDataFrame"] ::-webkit-scrollbar-track {
+    background: #f1f5f9 !important;
+}
 </style>
 """, unsafe_allow_html=True)
-
-# ── SCORING ───────────────────────────────────────────────────
-DESC_VOIRIE_FORT   = ['voirie', 'voirie et réseaux divers', 'chaussée']
-DESC_VOIRIE_FAIBLE = ['trottoir', 'revêtement', 'terrassement']
-MOTS_REFECTION = [
-    r'r[eé]fection.{0,30}(voirie|chauss[eé]e|trottoir|rue|avenue|boulevard)',
-    r'r[eé]habilitation.{0,30}(voirie|chauss[eé]e|rue|avenue)',
-    r'r[eé]am[eé]nagement.{0,30}(voirie|rue|avenue|boulevard|place|giratoire)',
-    r'am[eé]nagement.{0,30}(voirie|rue|avenue|boulevard|place|giratoire|carrefour)',
-    r'requalification.{0,30}(voirie|rue|avenue|boulevard|place)',
-    r'travaux.{0,20}voirie', r'entretien.{0,20}voirie',
-    r'am[eé]nagement urbain', r'enrob[eé]', r'enduit superficiel',
-    r'rev[eê]tement.{0,20}(chauss[eé]e|voirie|rue)',
-    r'trottoir', r'chauss[eé]e', r'giratoire',
-    r'carrefour.{0,20}(am[eé]nag|s[eé]curis)',
-]
-EXCLUSIONS_FORTES = [
-    r'\b(b[aâ]timent|r[eé]novation.{0,20}b[aâ]t|construction.{0,20}b[aâ]t)\b',
-    r'\b(r[eé]seau.{0,15}(ftth|fibre|eau potable|gaz|assainissement))\b',
-    r'\b(toiture|charpente|menuiserie|peinture.{0,10}b[aâ]t|plomberie)\b',
-    r'\b(barrage|berge|digue)\b', r'\b(ascenseur|escalier)\b',
-    r'\bd[eé]samiantage\b',
-    r'\b(pharmacie|h[oô]pital|chru?|ehpad)\b',
-    r'\bstade\b', r'\btribune\b', r'\bcimeti[eè]re\b', r'\ba[eé]roport\b',
-]
-HORS_PERIMETRE_INFRA = [
-    r'\bautoroute\b', r'\bvoie rapide\b', r'\b2\s*x\s*2\b',
-    r'\b(pont|viaduc|tablier|ouvrage d.art)\b.{0,40}(RN|RD|route)',
-    r'\b(RN|RD)\b.{0,40}\b(pont|viaduc|tablier|ouvrage d.art)\b',
-    r'\b(cloture|ecran acoustique|anticorrosion|potence)\b.{0,40}\b(RN|RD)\b',
-    r'\b(RN|RD)\b.{0,40}\b(cloture|ecran acoustique|anticorrosion|potence)\b',
-    r'\bcontournement\b.{0,20}\b(nord|sud|est|ouest)\b', r'\bechangeur\b',
-]
-KEYWORDS_CYCLABLE = [
-    r'piste cyclable', r'bande cyclable', r'voie cyclable',
-    r'itin[eé]raire cyclable', r'r[eé]seau cyclable',
-    r'v[eé]loroute', r'voie verte', r'couloir v[eé]lo',
-    r'am[eé]nagement cyclable', r'continuit[eé] cyclable',
-    r'arceaux? v[eé]lo', r'stationnement v[eé]lo',
-    r'abri v[eé]lo', r'box v[eé]lo', r'parking v[eé]lo',
-    r'borne de recharge.{0,20}v[eé]lo',
-    r'v[eé]lo\b', r'v[eé]los\b', r'cycliste',
-    r'deux[-\s]roues', r'mobilit[eé] douce',
-    r'cheminement doux', r'mode doux',
-    r'usager.{0,15}v[eé]lo', r'L\.?228[-\s]2',
-]
-FAUX_CONF_PATTERNS = [
-    r'cour.{0,20}(école|collège|lycée)',
-    r'(abri|parking|arceaux).{0,20}v[eé]lo.{0,40}(école|collège|lycée|bâtiment)',
-    r'centre aquatique', r'photovolta[iï]que', r'ombrière',
-    r'r[eé]novation (énergétique|thermique)',
-    r'(résidence|foyer).{0,20}(étudiant|jeune)',
-]
-
-def parse_descripteurs(val):
-    try:
-        lst = ast.literal_eval(str(val))
-        return [str(x).lower().strip() for x in lst] if isinstance(lst, list) else [str(val).lower()]
-    except:
-        return [s.strip().lower() for s in str(val).split(',')]
-
-def score_perimetre(row):
-    descs   = parse_descripteurs(row.get('descripteur_str', ''))
-    objet   = str(row.get('objet', '')).lower()
-    nb_desc = len(descs)
-    score   = 0
-    has_fort = any(any(v in d for v in DESC_VOIRIE_FORT) for d in descs)
-    if has_fort:
-        score += 0 if nb_desc > 8 else (1 if nb_desc > 5 else 2)
-    elif any(any(v in d for v in DESC_VOIRIE_FAIBLE) for d in descs) and nb_desc <= 4:
-        score += 1
-    for p in MOTS_REFECTION:
-        if re.search(p, objet, re.IGNORECASE): score += 1; break
-    for p in EXCLUSIONS_FORTES:
-        if re.search(p, objet, re.IGNORECASE): score -= 3; break
-    for p in HORS_PERIMETRE_INFRA:
-        if re.search(p, objet, re.IGNORECASE): score -= 3; break
-    if re.search(r'\bconstruction\b.{0,30}\b(neuve|b[aâ]timent|logements|maisons?)\b', objet, re.IGNORECASE):
-        score -= 1
-    return score
-
-def detecter_cyclable(texte):
-    t = str(texte).lower()
-    mots = []
-    for p in KEYWORDS_CYCLABLE:
-        m = re.findall(p, t, re.IGNORECASE)
-        if m: mots.extend([str(x).lower() for x in m])
-    return bool(mots), list(set(mots))
 
 def est_faux_conforme(row):
     if not row.get('cyclable_detecte'): return False
@@ -346,13 +283,13 @@ if "filter_relecture" not in st.session_state:
 if "filter_q" not in st.session_state:
     st.session_state["filter_q"] = st.query_params.get("q", "")
 
-items_per_page_options = [25, 50, 100, 200]
+items_per_page_options = [15, 25, 50, 100, 200]
 if "items_per_page" not in st.session_state:
     q_ipp = st.query_params.get("per_page")
     if q_ipp and q_ipp.isdigit() and int(q_ipp) in items_per_page_options:
         st.session_state["items_per_page"] = int(q_ipp)
     else:
-        st.session_state["items_per_page"] = 50
+        st.session_state["items_per_page"] = 25
 
 st.sidebar.title("🔍 Filtres")
 
@@ -378,7 +315,7 @@ sel_types = st.sidebar.multiselect("Type d'acheteur", available_types, key="filt
 items_per_page = st.sidebar.selectbox("Éléments par page", items_per_page_options, key="items_per_page")
 
 # Sauvegarde des filtres dans st.query_params
-if items_per_page != 50:
+if items_per_page != 25:
     st.query_params["per_page"] = str(items_per_page)
 else:
     st.query_params.pop("per_page", None)
@@ -581,8 +518,8 @@ if active_slug == "alertes":
             )
         disp = disp.rename(columns=cols_map).sort_values('Score', ascending=False)
 
-        # Pagination : éléments par page (50 par défaut, configurable)
-        items_per_page = st.session_state.get("items_per_page", 50)
+        # Pagination : éléments par page (25 par défaut, configurable)
+        items_per_page = st.session_state.get("items_per_page", 25)
         total_items = len(disp)
         total_pages = max(1, math.ceil(total_items / items_per_page))
 
@@ -824,13 +761,13 @@ L'algorithme évalue l'objet du marché et ses descripteurs CPV/BOAMP pour déte
 
 | Critère d'évaluation | Variation de score | Explications / Motifs |
 |---|:---:|---|
-| **Descripteur majeur "Voirie"** | **+2 pts** | Indique un marché centré sur la voirie (marché mono-lot ou bi-lot). |
-| **Descripteur "Voirie" en accord-cadre** | **+1 pt** | Descripteur présent dans un accord-cadre multi-lots (5 à 8 lots). |
+| **Descripteur majeur "Voirie"** | **+2 pts** | Indique un marché centré sur la voirie (mono ou bi-lot hors accord-cadre). |
+| **Descripteur "Voirie" en accord-cadre** | **+1 pt** | Présent dans un accord-cadre / bons de commande ou 5 à 8 lots. |
 | **Descripteur "Voirie" noyé dans un TCE** | **0 pt** | Marché Tous Corps d'État (> 8 lots) où la voirie n'est qu'accessoire. |
 | **Descripteurs secondaires** | **+1 pt** | Présence de mots-clés comme *"Chaussée"*, *"Trottoir"*, *"Revêtement"* (≤ 4 lots). |
 | **Mots-clés de réfection/réaménagement** | **+1 pt** | Intitulé ciblant une réfection/aménagement (*réfection*, *réhabilitation*, *enrobé*, *giratoire*...). |
 | **Exclusions bâtiment & réseaux** | **−3 pts** | Bâtiment, FTTH, eau/gaz, assainissement, cimetière, aéroport, désamiantage, etc. |
-| **Exclusions hors agglomération / infrastructures** | **−3 pts** | Autoroutes, voies rapides, 2x2 voies, échangeurs, ponts/viaducs sur RN/RD hors agglomération. |
+| **Exclusions hors agglomération / infrastructures** | **−3 pts** | Autoroutes, voies rapides, 2x2 voies, échangeurs, routes départementales/nationales rase campagne ou hors-agglo. |
 | **Construction neuve non routière** | **−1 pt** | Logements ou bâtiments neufs. |
 
 > 🎯 **Décision de périmètre** :

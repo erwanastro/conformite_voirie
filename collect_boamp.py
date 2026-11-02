@@ -13,10 +13,18 @@ KEYWORDS_CYCLABLE = [
     r'arceaux? v[eé]lo', r'stationnement v[eé]lo',
     r'abri v[eé]lo', r'box v[eé]lo', r'parking v[eé]lo',
     r'borne de recharge.{0,20}v[eé]lo',
-    r'v[eé]lo\b', r'v[eé]los\b', r'cycliste',
+    r'\bv[eé]los?\b', r'\bcyclistes?\b',
     r'deux[-\s]roues', r'mobilit[eé] douce',
     r'cheminement doux', r'mode doux',
     r'usager.{0,15}v[eé]lo', r'L\.?228[-\s]2',
+    r'chaucidou', r'chauss[eé]e [aà] voie centrale banalis[eé]e', r'\bcvb\b',
+    r'zone de rencontre', r'double[-\s]sens cyclable', r'\bdsc\b',
+    r'zone 30', r'voie lyonnaise', r'r[eé]seau express v[eé]lo', r'\brev\b',
+]
+
+EXCLUSIONS_CYCLABLE = [
+    r'cycle.{0,15}(feux?|triennal|universitaire|scolaire|vie|eau|bact[eé]rien|azote|devoir|achat|carbone)',
+    r'(feu|feux).{0,15}cycle',
 ]
 
 DESC_VOIRIE_FORT   = ['voirie', 'voirie et réseaux divers', 'chaussée']
@@ -48,8 +56,16 @@ EXCLUSIONS_FORTES = [
 ]
 
 HORS_PERIMETRE_INFRA = [
-    r'\bRN\s*\d+\b', r'\bautoroute\b',
+    r'\bRN\s*\d+\b', r'\bautoroute\b', r'\bvoie rapide\b', r'\b2\s*x\s*2\b',
     r'\bRD\s*\d+.{0,40}(hors agglo|route d[eé]partementale.{0,20}(entre|pr\s*\d|section))',
+    r'\bhors\s+(agglo|agglom[eé]ration)\b',
+    r'\brase\s+campagne\b',
+    r'\bitin[eé]raire\s+intercommunal\b',
+    r'\b(pont|viaduc|tablier|ouvrage d.art)\b.{0,40}(RN|RD|route)',
+    r'\b(RN|RD)\b.{0,40}\b(pont|viaduc|tablier|ouvrage d.art)\b',
+    r'\b(cloture|ecran acoustique|anticorrosion|potence)\b.{0,40}\b(RN|RD)\b',
+    r'\b(RN|RD)\b.{0,40}\b(cloture|ecran acoustique|anticorrosion|potence)\b',
+    r'\bcontournement\b.{0,20}\b(nord|sud|est|ouest)\b', r'\bechangeur\b',
 ]
 
 FAUX_CONF_PATTERNS = [
@@ -72,14 +88,18 @@ def parse_descripteurs(val):
 def score_perimetre_l228(row):
     descs  = parse_descripteurs(row.get('descripteur_libelle', row.get('descripteur_str', '')))
     objet  = str(row.get('objet', '')).lower()
+    proc   = str(row.get('procedure_libelle', '')).lower()
     nb_desc = len(descs)
     score  = 0
+
+    # Détection accord-cadre / bons de commande
+    is_accord_cadre = bool(re.search(r'accord[- ]cadre|bons?\s+de\s+commande', objet + ' ' + proc, re.IGNORECASE))
 
     has_voirie_fort = any(any(v in d for v in DESC_VOIRIE_FORT) for d in descs)
     if has_voirie_fort:
         if nb_desc > 8:
             score += 0
-        elif nb_desc > 5:
+        elif nb_desc > 5 or is_accord_cadre:
             score += 1
         else:
             score += 2
@@ -99,7 +119,7 @@ def score_perimetre_l228(row):
 
     for p in HORS_PERIMETRE_INFRA:
         if re.search(p, objet, re.IGNORECASE):
-            score -= 2
+            score -= 3
             break
 
     if re.search(r'\bconstruction\b.{0,30}\b(neuve|b[aâ]timent|logements|maisons?)\b', objet, re.IGNORECASE):
@@ -109,6 +129,10 @@ def score_perimetre_l228(row):
 
 def detecter_cyclable(texte):
     t = str(texte).lower()
+    # Vérifier d'abord s'il y a une fausse alerte sur "cycle" non vélo
+    for ex in EXCLUSIONS_CYCLABLE:
+        t = re.sub(ex, '', t, flags=re.IGNORECASE)
+
     mots = []
     for p in KEYWORDS_CYCLABLE:
         m = re.findall(p, t, re.IGNORECASE)
